@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 #include <atomic>
+#include <initializer_list>
 
 #define POS_MODE 0x100
 #define SPEED_MODE 0x200
@@ -104,6 +105,7 @@ enum DM_REG {
   xout = 81,
 };
 
+// TODO(me): ascii 解析不完全，丢失电机错误码信息，更改hscant固件后再来完善
 #pragma pack(push, 1)
 typedef struct {
   uint8_t FrameHeader;
@@ -259,6 +261,9 @@ public:
   ~Motor_Control();
   //读取串口电机数据线程
   void get_motor_data_thread();
+
+  // 发送数据线程
+  void send_motor_data_thread();
   /*
    * @brief enable the motor 使能电机
    * @param motor 电机对象
@@ -266,6 +271,7 @@ public:
   void enable();
 
   void hscant_init(const std::string &_port);
+  void hscant_deinit(const std::string &_port);
   // void write();
   // void read();
   /*
@@ -273,6 +279,7 @@ public:
    * @param motor object 电机对象
    */
   void refresh_motor_status(const Motor &motor);
+  void refresh_allmotor_status();
 
   void disable();
   void set_zero_position();
@@ -293,7 +300,8 @@ public:
    * @brief add motor to class 添加电机
    * @param DM_Motor : motor object 电机对象
    */
-  void addMotor(Motor *DM_Motor);
+  // void addMotor(Motor *DM_Motor);
+  void addMotor(std::initializer_list<std::shared_ptr<Motor>> Motor_list);
 
   /*
    * @description: read motor register param
@@ -367,19 +375,20 @@ private:
     memcpy(&result, &combined, sizeof(result));
     return result;
   }
-  std::thread rec_thread;
+  std::thread recv_thread;
+  std::thread send_thread;
   // std::unique_ptr<std::thread> rec_thread;
 
-  std::unordered_map<Motor_id, Motor *> motors;
+  std::unordered_map<Motor_id, std::shared_ptr<Motor>> motors;
   std::unique_ptr<Serial::SerialPort> serial_;
-
+  
   // ! 似乎是一个由用户维护的数据，用于集中管理单个串口的多个电机
   // ! 配套的api有MotorContorl构造函数、write、read函数
-  // TODO(me): 暂时不用这样暴露整个数据，后续修改
+  // TODO(me): 暂时不用像这样暴露整个数据，后续修改
   std::unordered_map<Motor_id, DmActData> dmact_data;
 
-  // bool stop_thread_ = false;
-  std::atomic<bool> stop_thread_ = true;
+  std::atomic<bool> stop_recv_thread_ = true;
+  std::atomic<bool> stop_send_thread_ = true;
 
   can_send_frame send_data;         // send data frame
   CAN_Receive_Frame receive_data{}; // receive data frame
