@@ -22,7 +22,7 @@ class SerialPort {
 public:
   using SharedPtr = std::shared_ptr<SerialPort>;
 
-  SerialPort(std::string port, speed_t baudrate, int timeout_ms = 2) {
+  SerialPort(std::string port, speed_t baudrate, int timeout_ms = 50) {
     set_timeout(timeout_ms);
     Init(port, baudrate);
   }

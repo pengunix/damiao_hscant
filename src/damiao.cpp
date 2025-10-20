@@ -70,11 +70,12 @@ bool Motor::is_have_param(int key) const {
   return param_map.find(key) != param_map.end();
 }
 
-Motor_Control::Motor_Control(const std::string & serial_port, Serial::speed_t serial_baud) {
+Motor_Control::Motor_Control(const std::string &serial_port,
+                             Serial::speed_t serial_baud) {
+
   // const std::unordered_map<Motor_id, DmActData>& dmact_data)
   //   : dmact_data(dmact_data) {
 
-  serial_ = std::make_unique<Serial::SerialPort>(serial_port, serial_baud);
   // for (const auto & item : dmact_data) {
   //   Motor *motor =
   //       new Motor(item.second.motorType, item.second.can_id,
@@ -82,35 +83,42 @@ Motor_Control::Motor_Control(const std::string & serial_port, Serial::speed_t se
   //   addMotor(motor);
   // }
 
-  hscant_init(serial_port);
-  enable(); 
+  serial_ = std::make_unique<Serial::SerialPort>(serial_port, serial_baud);
 
-  rec_thread = std::thread(std::bind(&Motor_Control::get_motor_data_thread, this));
-  stop_thread_ = false;
+  hscant_init(serial_port);
+
+  recv_thread =
+      std::thread(std::bind(&Motor_Control::get_motor_data_thread, this));
+  stop_recv_thread_ = false;
+
+  // send_thread =
+      // std::thread(std::bind(&Motor_Control::send_motor_data_thread, this));
+  // stop_send_thread_ = false;
 }
 
+// TODO(me): 模块完成后检查类中是否有动态存储期成员需要释放
 Motor_Control::~Motor_Control() {
-  // TODO(me): 改logger
-  // std::cerr << "enter ~Motor_Control()" << std::endl;
-
+  // std::cout << "Motor_Control deinit" << std::endl;
   for (const auto &pair : motors) {
     Motor_id id = pair.first;
-    // std::cerr<<"id: "<<id<<std::endl;
     control_mit(*motors[id], 0, 0.3, 0, 0, 0);
   }
-  stop_thread_ = true;
-  // if (serial_.isOpen())
-  //  {
-  //    serial_.close();
-  //  }
-  if (rec_thread.joinable()) {
-    rec_thread.join();
+  stop_recv_thread_ = true;
+  stop_send_thread_ = true;
+  if (recv_thread.joinable()) {
+    recv_thread.join();
   }
+
+  if (send_thread.joinable()) {
+    send_thread.join();
+  }
+
   if (serial_->is_Open()) {
     serial_->close();
   }
 }
 
+// TODO(me): 这个很不妙啊，需要改进
 std::string getPortString(const std::string &_port) {
   static const std::unordered_map<std::string, std::string> portMap = {
       {"/dev/ttyACM0", "r_can0"},
@@ -122,7 +130,7 @@ std::string getPortString(const std::string &_port) {
   if (it != portMap.end()) {
     return it->second;
   }
-  // TODO(me): 增加logger
+  // TODO(me): 增加logger，提示没有找到对应的端口，使用默认端口
   return "r_can0";
 }
 
@@ -130,33 +138,33 @@ void Motor_Control::hscant_init(const std::string &_port) {
   std::string cmd = getPortString(_port);
   serial_->send((uint8_t *)cmd.data(), cmd.size());
   usleep(200);
-  uint8_t data_buf0[3] = {0x53, 0x38, 0x0D};
-  serial_->send((uint8_t *)&data_buf0, sizeof(data_buf0));
-  serial_->send((uint8_t *)&data_buf0, sizeof(data_buf0));
+  // S8\r 选择波特率为1000000
+  uint8_t data_buf0[3] = {'S', '8', '\r'};
   serial_->send((uint8_t *)&data_buf0, sizeof(data_buf0));
   usleep(200);
-  uint8_t data_buf1[3] = {0x55, 0x31, 0x0D};
-  serial_->send((uint8_t *)&data_buf1, sizeof(data_buf1));
-  serial_->send((uint8_t *)&data_buf1, sizeof(data_buf1));
+
+  // U1\r
+  uint8_t data_buf1[3] = {'U', '1', '\r'};
   serial_->send((uint8_t *)&data_buf1, sizeof(data_buf1));
   usleep(200);
-  uint8_t data_buf2[2] = {0x4F, 0x0D};
+
+  // O\r
+  uint8_t data_buf2[2] = {'O', '\r'};
   serial_->send((uint8_t *)&data_buf2, sizeof(data_buf2));
   usleep(200);
-  // TODO(me): 改logger
-  // std::cerr << "hscant_ok" << cmd << std::endl;
 }
+
+// TODO(me): 实现四路can口的deinit
+void Motor_Control::hscant_deinit(const std::string &_port) {}
 
 void Motor_Control::enable() {
   for (auto &it : motors) {
-    for (int j = 0; j < 20; j++) {
       control_cmd(it.second->GetSlaveId(), 0xFC);
-      usleep(20000);
-    }
+      usleep(2000);
   }
 }
 
-//读电机反馈命令
+// 读电机反馈命令
 // TODO(me): 该api似乎没有效果，有控制指令用不到它，没控制指令又不会刷新数据
 void Motor_Control::refresh_motor_status(const Motor &motor) {
   uint32_t id = 0x7FF;
@@ -167,20 +175,32 @@ void Motor_Control::refresh_motor_status(const Motor &motor) {
   send_data.modify(id, data_buf.data());
   serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
 }
+// TODO(me): 为啥还不行
+void Motor_Control::refresh_allmotor_status() {
+  uint32_t id = 0x7FF;
+  for (auto &it : motors) {
+    const Motor &motor = *(it.second);
+    uint8_t can_low = motor.GetSlaveId() & 0xff;         // id low 8 bit
+    uint8_t can_high = (motor.GetSlaveId() >> 8) & 0xff; // id high 8 bit
+    std::array<uint8_t, 8> data_buf = {can_low, can_high, 0xCC, 0x00,
+                                      0x00,    0x00,     0x00, 0x00};
+    send_data.modify(id, data_buf.data());
+    serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+    usleep(200);
+  }
+}
 
 void Motor_Control::disable() {
   for (auto &it : motors) {
-    for (int j = 0; j < 20; j++)
-      control_cmd(it.second->GetSlaveId(), 0xFD);
-    { usleep(2000); }
+    control_cmd(it.second->GetSlaveId(), 0xFD);
+    usleep(2000);
   }
 }
 
 void Motor_Control::set_zero_position() {
   for (auto &it : motors) {
-    for (int j = 0; j < 20; j++)
-      control_cmd(it.second->GetSlaveId(), 0xFE);
-    { usleep(2000); }
+    control_cmd(it.second->GetSlaveId(), 0xFE);
+    usleep(2000);
   }
 }
 
@@ -196,6 +216,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
   Motor_id id = motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
     // TODO(me): 完全去掉异常，提示并终止程序即可
+    // FATAL error
     // throw std::runtime_error("Motor_Control id not found");
   }
   auto &m = motors[id];
@@ -221,7 +242,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
 
   send_data.modify(id, data_buf.data());
   serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
-  usleep(200); // 1s
+  usleep(200);
 }
 
 void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
@@ -229,6 +250,7 @@ void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
   if (motors.find(id) == motors.end()) {
     // TODO(me): 完全去掉异常，提示并终止程序即可
     // throw std::runtime_error("POS_VEL ERROR : Motor_Control id not found");
+    // FATAL error
   }
   std::array<uint8_t, 8> data_buf{};
   memcpy(data_buf.data(), &pos, sizeof(float));
@@ -253,49 +275,52 @@ void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
 }
 
 // TODO(me): 数据包修正
-void Motor_Control::receive_param()
-{
-    // 待修正，临时终止函数运行
-    return;
+void Motor_Control::receive_param() {
+  // 待修正，临时终止函数运行
+  return;
 
-
-
-
-    if(receive_data.FrameHeader == 0x11 && receive_data.frameEnd == 0x55) // receive success
-    {
-        auto & data = receive_data.canData;
-        if(data[2]==0x33 or data[2]==0x55)
-        {
-            uint32_t slaveID = (uint32_t(data[1]) << 8) | data[0];
-            uint8_t RID = data[3];
-            if (motors.find(slaveID) == motors.end())
-            {
-                //can not found motor id
-                return;
-            }
-            if(is_in_ranges(RID))
-            {
-                uint32_t data_uint32 = (uint32_t(data[7]) << 24) | (uint32_t(data[6]) << 16) | (uint32_t(data[5]) << 8) | data[4];
-                motors[slaveID]->set_param(RID, data_uint32);
-            }
-            else
-            {
-                float data_float = uint8_to_float(data + 4);
-                motors[slaveID]->set_param(RID, data_float);
-            }
-        }
-        return ;
+  if (receive_data.FrameHeader == 0x11 &&
+      receive_data.frameEnd == 0x55) // receive success
+  {
+    auto &data = receive_data.canData;
+    if (data[2] == 0x33 or data[2] == 0x55) {
+      uint32_t slaveID = (uint32_t(data[1]) << 8) | data[0];
+      uint8_t RID = data[3];
+      if (motors.find(slaveID) == motors.end()) {
+        // can not found motor id
+        return;
+      }
+      if (is_in_ranges(RID)) {
+        uint32_t data_uint32 = (uint32_t(data[7]) << 24) |
+                               (uint32_t(data[6]) << 16) |
+                               (uint32_t(data[5]) << 8) | data[4];
+        motors[slaveID]->set_param(RID, data_uint32);
+      } else {
+        float data_float = uint8_to_float(data + 4);
+        motors[slaveID]->set_param(RID, data_float);
+      }
     }
+    return;
+  }
 }
-
 
 /**
  * @brief add motor to class 添加电机
- * @param DM_Motor : motor object 电机对象
+ * @param DM_Motor : motor object 电机对象的地址
  */
-void Motor_Control::addMotor(Motor *DM_Motor) {
-  motors.insert({DM_Motor->GetSlaveId(), DM_Motor});
-  motors.insert({DM_Motor->GetMasterId(), DM_Motor});
+// void Motor_Control::addMotor(Motor *DM_Motor) {
+//   motors.insert({DM_Motor->GetSlaveId(), DM_Motor});
+//   motors.insert({DM_Motor->GetMasterId(), DM_Motor});
+// }
+
+void Motor_Control::addMotor(
+    std::initializer_list<std::shared_ptr<Motor>> Motor_list) {
+  for (const auto &motor_ptr : Motor_list) {
+    // TODO(me); 检查电机初始化状态
+    motors.insert({motor_ptr->GetSlaveId(), motor_ptr});
+    motors.insert({motor_ptr->GetMasterId(), motor_ptr});
+  }
+  disable();
 }
 
 /*
@@ -487,9 +512,14 @@ uint8_t hexCharToNibble(uint8_t c) {
 }
 
 void Motor_Control::get_motor_data_thread() {
-  while (!stop_thread_) {
+  while (!stop_recv_thread_) {
     serial_->recv((uint8_t *)&receive_data, sizeof(CAN_Receive_Frame));
 
+    // const uint8_t* bytes = (uint8_t *)&receive_data;
+    // for (size_t i = 0; i < sizeof(receive_data); ++i) {
+    //     printf("%02X ", bytes[i]);
+    // }
+    // printf("\n");
 
     if (receive_data.FrameHeader == 0x74 && receive_data.frameEnd == 0x0D) {
       static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
@@ -535,6 +565,11 @@ void Motor_Control::get_motor_data_thread() {
     } else {
       // TODO(me): 提示错误接收帧
     }
+  }
+}
+
+void Motor_Control::send_motor_data_thread() {
+  while (!stop_send_thread_) {
   }
 }
 
