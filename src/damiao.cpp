@@ -84,33 +84,24 @@ Motor_Control::Motor_Control(const std::string &serial_port,
   // }
 
   serial_ = std::make_unique<Serial::SerialPort>(serial_port, serial_baud);
+  update_thread =
+      std::thread(&Motor_Control::update_motor, this);
+  stop_update_thread_ = false;
 
   hscant_init(serial_port);
-
-  recv_thread =
-      std::thread(std::bind(&Motor_Control::get_motor_data_thread, this));
-  stop_recv_thread_ = false;
-
-  // send_thread =
-      // std::thread(std::bind(&Motor_Control::send_motor_data_thread, this));
-  // stop_send_thread_ = false;
 }
 
 // TODO(me): 模块完成后检查类中是否有动态存储期成员需要释放
 Motor_Control::~Motor_Control() {
-  // std::cout << "Motor_Control deinit" << std::endl;
   for (const auto &pair : motors) {
     Motor_id id = pair.first;
     control_mit(*motors[id], 0, 0.3, 0, 0, 0);
   }
-  stop_recv_thread_ = true;
-  stop_send_thread_ = true;
-  if (recv_thread.joinable()) {
-    recv_thread.join();
-  }
 
-  if (send_thread.joinable()) {
-    send_thread.join();
+  stop_update_thread_ = true;
+  send_queue.shutdown();
+  if (update_thread.joinable()) {
+    update_thread.join();
   }
 
   if (serial_->is_Open()) {
@@ -135,6 +126,7 @@ std::string getPortString(const std::string &_port) {
 }
 
 void Motor_Control::hscant_init(const std::string &_port) {
+  // 初始化阶段不用同步队列发送
   std::string cmd = getPortString(_port);
   serial_->send((uint8_t *)cmd.data(), cmd.size());
   usleep(200);
@@ -159,8 +151,7 @@ void Motor_Control::hscant_deinit(const std::string &_port) {}
 
 void Motor_Control::enable() {
   for (auto &it : motors) {
-      control_cmd(it.second->GetSlaveId(), 0xFC);
-      usleep(2000);
+    control_cmd(it.second->GetSlaveId(), 0xFC);
   }
 }
 
@@ -173,7 +164,8 @@ void Motor_Control::refresh_motor_status(const Motor &motor) {
   std::array<uint8_t, 8> data_buf = {can_low, can_high, 0xCC, 0x00,
                                      0x00,    0x00,     0x00, 0x00};
   send_data.modify(id, data_buf.data());
-  serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  send_queue.try_push(send_data);
 }
 // TODO(me): 为啥还不行
 void Motor_Control::refresh_allmotor_status() {
@@ -183,9 +175,10 @@ void Motor_Control::refresh_allmotor_status() {
     uint8_t can_low = motor.GetSlaveId() & 0xff;         // id low 8 bit
     uint8_t can_high = (motor.GetSlaveId() >> 8) & 0xff; // id high 8 bit
     std::array<uint8_t, 8> data_buf = {can_low, can_high, 0xCC, 0x00,
-                                      0x00,    0x00,     0x00, 0x00};
+                                       0x00,    0x00,     0x00, 0x00};
     send_data.modify(id, data_buf.data());
-    serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+    // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+    send_queue.try_push(send_data);
     usleep(200);
   }
 }
@@ -193,7 +186,6 @@ void Motor_Control::refresh_allmotor_status() {
 void Motor_Control::disable() {
   for (auto &it : motors) {
     control_cmd(it.second->GetSlaveId(), 0xFD);
-    usleep(2000);
   }
 }
 
@@ -241,7 +233,8 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
   data_buf[7] = tau_uint & 0xff;
 
   send_data.modify(id, data_buf.data());
-  serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  send_queue.try_push(send_data);
   usleep(200);
 }
 
@@ -257,8 +250,9 @@ void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
   memcpy(data_buf.data() + 4, &vel, sizeof(float));
   id += POS_MODE;
   send_data.modify(id, data_buf.data());
-  serial_->send(reinterpret_cast<uint8_t *>(&send_data),
-                sizeof(can_send_frame));
+  // serial_->send(reinterpret_cast<uint8_t *>(&send_data),
+                // sizeof(can_send_frame));
+  send_queue.try_push(send_data);
 }
 
 void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
@@ -271,7 +265,8 @@ void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
   memcpy(data_buf.data(), &vel, sizeof(float));
   id = id + SPEED_MODE;
   send_data.modify(id, data_buf.data());
-  serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  send_queue.try_push(send_data);
 }
 
 // TODO(me): 数据包修正
@@ -337,7 +332,8 @@ float Motor_Control::read_motor_param(Motor &DM_Motor, uint8_t RID) {
   std::array<uint8_t, 8> data_buf{can_low, can_high, 0x33, RID,
                                   0x00,    0x00,     0x00, 0x00};
   send_data.modify(0x7FF, data_buf.data());
-  serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  send_queue.try_push(send_data);
   for (uint8_t i = 0; i < max_retries; i++) {
     usleep(retry_interval);
     // receive_param();
@@ -430,7 +426,8 @@ void Motor_Control::save_motor_param(Motor &DM_Motor) {
   std::array<uint8_t, 8> data_buf{id_low, id_high, 0xAA, 0x01,
                                   0x00,   0x00,    0x00, 0x00};
   send_data.modify(0x7FF, data_buf.data());
-  serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  send_queue.try_push(send_data);
   usleep(100000); // 100ms wait for save
 }
 
@@ -451,7 +448,9 @@ void Motor_Control::control_cmd(Motor_id id, uint8_t cmd) {
   std::array<uint8_t, 8> data_buf = {0xff, 0xff, 0xff, 0xff,
                                      0xff, 0xff, 0xff, cmd};
   send_data.modify(id, data_buf.data());
-  serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  send_queue.try_push(send_data);
+  usleep(200);
 }
 
 void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
@@ -467,15 +466,25 @@ void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
   data_buf[7] = data[3];
   send_data.modify(0x7FF, data_buf.data());
 
-  serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
+  send_queue.try_push(send_data);
+}
+
+// 所有发送数据集中在这里，不阻塞主线程
+void Motor_Control::update_motor() {
+  while (!stop_update_thread_) {
+    can_send_frame frame;
+    if (send_queue.pop(frame)) {
+      serial_->send((uint8_t *)&frame, sizeof(can_send_frame));
+      get_motor_data();
+    }
+  }
 }
 
 // void Motor_Control::write() {
 //   for (const auto &m : dmact_data) {
 //     int motor_id = m.first; //这里指的是can_id
 //     if (motors.find(motor_id) == motors.end()) {
-//       // TODO(me): 完全去掉异常，提示并终止程序即可
-//       // throw std::runtime_error("read ERROR : Motor_Control id not found");
 //     }
 //     auto &it = motors[motor_id];
 
@@ -489,8 +498,6 @@ void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
 //   for (auto &m : dmact_data) {
 //     int motor_id = m.first; //这里指的是can_id
 //     if (motors.find(motor_id) == motors.end()) {
-//       // TODO(me): 完全去掉异常，提示并终止程序即可
-//       // throw std::runtime_error("read ERROR : Motor_Control id not found");
 //     }
 //     auto &it = motors[motor_id];
 
@@ -501,6 +508,7 @@ void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
 //   }
 // }
 
+// TODO(me): 修改hscant固件，支持透传模式，删除ascii转换逻辑
 uint8_t hexCharToNibble(uint8_t c) {
   if (c >= '0' && c <= '9')
     return c - '0';
@@ -511,66 +519,145 @@ uint8_t hexCharToNibble(uint8_t c) {
   return 0;                // 处理无效字符
 }
 
-void Motor_Control::get_motor_data_thread() {
-  while (!stop_recv_thread_) {
-    serial_->recv((uint8_t *)&receive_data, sizeof(CAN_Receive_Frame));
+void Motor_Control::get_motor_data() {
+  serial_->recv((uint8_t *)&receive_data, sizeof(CAN_Receive_Frame));
 
-    // const uint8_t* bytes = (uint8_t *)&receive_data;
-    // for (size_t i = 0; i < sizeof(receive_data); ++i) {
-    //     printf("%02X ", bytes[i]);
-    // }
-    // printf("\n");
+  if (receive_data.FrameHeader == 0x74 && receive_data.frameEnd == 0x0D) {
+    static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
+                                   uint8_t bits) -> float {
+      float span = xmax - xmin;
+      float data_norm = float(x) / ((1 << bits) - 1);
+      float data = data_norm * span + xmin;
+      return data;
+    };
 
-    if (receive_data.FrameHeader == 0x74 && receive_data.frameEnd == 0x0D) {
-      static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
-                                     uint8_t bits) -> float {
-        float span = xmax - xmin;
-        float data_norm = float(x) / ((1 << bits) - 1);
-        float data = data_norm * span + xmin;
-        return data;
-      };
+    uint8_t data[8];
+    for (int i = 0; i < 8; i++) {
+      uint8_t highChar = receive_data.canData[2 * i];
+      uint8_t lowChar = receive_data.canData[2 * i + 1];
 
-      uint8_t data[8];
-      for (int i = 0; i < 8; i++) {
-        uint8_t highChar = receive_data.canData[2 * i];
-        uint8_t lowChar = receive_data.canData[2 * i + 1];
+      uint8_t highNibble = hexCharToNibble(highChar);
+      uint8_t lowNibble = hexCharToNibble(lowChar);
 
-        uint8_t highNibble = hexCharToNibble(highChar);
-        uint8_t lowNibble = hexCharToNibble(lowChar);
-
-        data[i] = (highNibble << 4) | lowNibble;
-      }
-
-      uint16_t q_uint = (uint16_t(data[1]) << 8) | data[2];
-      uint16_t dq_uint = (uint16_t(data[3]) << 4) | (data[4] >> 4);
-      uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
-
-      uint32_t canId = (hexCharToNibble(receive_data.canId[0]) << 8) |
-                       (hexCharToNibble(receive_data.canId[1]) << 4) |
-                       hexCharToNibble(receive_data.canId[2]);
-
-      if (motors.find(canId) == motors.end()) {
-        return;
-      }
-      auto m = motors[canId];
-      Limit_param limit_param_receive = m->get_limit_param();
-      float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX,
-                                      limit_param_receive.Q_MAX, 16);
-      float receive_dq = uint_to_float(dq_uint, -limit_param_receive.DQ_MAX,
-                                       limit_param_receive.DQ_MAX, 12);
-      float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX,
-                                        limit_param_receive.TAU_MAX, 12);
-
-      m->receive_data(receive_q, receive_dq, receive_tau);
-    } else {
-      // TODO(me): 提示错误接收帧
+      data[i] = (highNibble << 4) | lowNibble;
     }
+
+    uint16_t q_uint = (uint16_t(data[1]) << 8) | data[2];
+    uint16_t dq_uint = (uint16_t(data[3]) << 4) | (data[4] >> 4);
+    uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
+
+    uint32_t canId = (hexCharToNibble(receive_data.canId[0]) << 8) |
+                     (hexCharToNibble(receive_data.canId[1]) << 4) |
+                     hexCharToNibble(receive_data.canId[2]);
+
+    if (motors.find(canId) == motors.end()) {
+      return;
+    }
+    auto m = motors[canId];
+    Limit_param limit_param_receive = m->get_limit_param();
+    float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX,
+                                    limit_param_receive.Q_MAX, 16);
+    float receive_dq = uint_to_float(dq_uint, -limit_param_receive.DQ_MAX,
+                                     limit_param_receive.DQ_MAX, 12);
+    float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX,
+                                      limit_param_receive.TAU_MAX, 12);
+
+    m->receive_data(receive_q, receive_dq, receive_tau);
+  } else {
+    // TODO(me): 提示错误接收帧
   }
 }
 
-void Motor_Control::send_motor_data_thread() {
-  while (!stop_send_thread_) {
-  }
+
+
+template<typename T>
+Queue<T>::Queue() : shutdown_(false) {
+}
+
+// 非阻塞推送
+template<typename T>
+bool Queue<T>::try_push(T value) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (shutdown_) {
+        return false;
+    }
+    
+    queue_.push(std::move(value));
+    cond_.notify_one();
+    return true;
+}
+
+// 非阻塞获取
+template<typename T>
+bool Queue<T>::try_pop(T& value) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (queue_.empty() || shutdown_) {
+        return false;
+    }
+    
+    value = std::move(queue_.front());
+    queue_.pop();
+    return true;
+}
+
+// 阻塞获取
+template<typename T>
+bool Queue<T>::pop(T& value) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    
+    cond_.wait(lock, [this]() { 
+        return !queue_.empty() || shutdown_; 
+    });
+    
+    if (shutdown_ && queue_.empty()) {
+        return false;
+    }
+    
+    value = std::move(queue_.front());
+    queue_.pop();
+    return true;
+}
+
+// 队列大小
+template<typename T>
+size_t Queue<T>::size() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return queue_.size();
+}
+
+// 队列是否为空
+template<typename T>
+bool Queue<T>::empty() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return queue_.empty();
+}
+
+// 清空队列
+template<typename T>
+void Queue<T>::clear() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    while (!queue_.empty()) {
+        queue_.pop();
+    }
+}
+
+// 关闭队列
+template<typename T>
+void Queue<T>::shutdown() {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shutdown_ = true;
+    }
+    cond_.notify_all();
+}
+
+// 检查是否已关闭
+template<typename T>
+bool Queue<T>::is_shutdown() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return shutdown_;
 }
 
 } // namespace damiao

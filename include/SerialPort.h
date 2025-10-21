@@ -7,6 +7,7 @@
 #include <string>
 #include <cstring>
 #include <unistd.h>
+#include <iostream>
 
 namespace Serial {
 
@@ -22,7 +23,7 @@ class SerialPort {
 public:
   using SharedPtr = std::shared_ptr<SerialPort>;
 
-  SerialPort(std::string port, speed_t baudrate, int timeout_ms = 50) {
+  SerialPort(std::string port, speed_t baudrate, int timeout_ms = 10) {
     set_timeout(timeout_ms);
     Init(port, baudrate);
   }
