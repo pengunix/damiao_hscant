@@ -13,6 +13,10 @@
 #include <vector>
 #include <atomic>
 #include <initializer_list>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+
 
 #define POS_MODE 0x100
 #define SPEED_MODE 0x200
@@ -125,6 +129,7 @@ typedef struct {
 } CAN_Receive_Frame;
 #pragma pack(pop)
 
+// TODO(me)：发送改为透传模式
 typedef struct can_send_frame {
   uint8_t FrameHeader = 0x74; // 帧头
   uint8_t canId[3] = {0};     // CAN ID 使用电机ID作为CAN ID
@@ -243,6 +248,32 @@ public:
   bool is_have_param(int key) const;
 };
 
+// TODO(me): 实现电机意外断开连接的自动恢复机制
+template<typename T>
+class Queue {
+private:
+    mutable std::mutex mutex_;
+    std::queue<T> queue_;
+    std::condition_variable cond_;
+    bool shutdown_;
+
+public:
+    Queue();
+    ~Queue() = default;
+    
+    Queue(const Queue&) = delete;
+    Queue& operator=(const Queue&) = delete;
+    
+    bool try_push(T value);
+    bool try_pop(T& value);
+    bool pop(T& value);
+    size_t size() const;
+    bool empty() const;
+    void clear();
+    void shutdown();
+    bool is_shutdown() const;
+};
+
 /**
  * @brief motor control class 电机控制类
  *
@@ -259,11 +290,8 @@ public:
     //  const std::unordered_map<Motor_id, DmActData>& dmact_data);
 
   ~Motor_Control();
-  //读取串口电机数据线程
-  void get_motor_data_thread();
 
-  // 发送数据线程
-  void send_motor_data_thread();
+  void get_motor_data();
   /*
    * @brief enable the motor 使能电机
    * @param motor 电机对象
@@ -295,6 +323,8 @@ public:
   void receive();
 
   void receive_param();
+
+  
 
   /**
    * @brief add motor to class 添加电机
@@ -351,8 +381,9 @@ public:
 
 private:
   void control_cmd(Motor_id id, uint8_t cmd);
-
   void write_motor_param(Motor &DM_Motor, uint8_t RID, const uint8_t data[4]);
+  void update_motor();
+
   static bool is_in_ranges(int number) {
     return (7 <= number && number <= 10) || (13 <= number && number <= 16) ||
            (35 <= number && number <= 36);
@@ -375,21 +406,18 @@ private:
     memcpy(&result, &combined, sizeof(result));
     return result;
   }
-  std::thread recv_thread;
-  std::thread send_thread;
   // std::unique_ptr<std::thread> rec_thread;
+  std::thread update_thread;
+  std::atomic<bool> stop_update_thread_;
 
   std::unordered_map<Motor_id, std::shared_ptr<Motor>> motors;
   std::unique_ptr<Serial::SerialPort> serial_;
+  Queue<can_send_frame> send_queue;
   
   // ! 似乎是一个由用户维护的数据，用于集中管理单个串口的多个电机
   // ! 配套的api有MotorContorl构造函数、write、read函数
   // TODO(me): 暂时不用像这样暴露整个数据，后续修改
   std::unordered_map<Motor_id, DmActData> dmact_data;
-
-  std::atomic<bool> stop_recv_thread_ = true;
-  std::atomic<bool> stop_send_thread_ = true;
-
   can_send_frame send_data;         // send data frame
   CAN_Receive_Frame receive_data{}; // receive data frame
 };
