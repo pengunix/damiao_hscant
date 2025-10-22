@@ -249,6 +249,7 @@ public:
 };
 
 // TODO(me): 实现电机意外断开连接的自动恢复机制
+// TODO(me): 可以试试链表实现的无锁队列
 template<typename T>
 class Queue {
 private:
