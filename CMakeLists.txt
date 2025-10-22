@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(dm_motor)
+project(dm_motor_ros)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -17,10 +17,11 @@ generate_messages(DEPENDENCIES std_msgs)
 ## catkin specific configuration ##
 ###################################
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES dm_motor
-#  CATKIN_DEPENDS roscpp std_msgs
+  INCLUDE_DIRS include
+  CATKIN_DEPENDS message_runtime message_generation roscpp std_msgs 
 #  DEPENDS system_lib
+#  LIBRARIES dm_motor
+  
 )
 
 ###########
@@ -32,10 +33,10 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/include
 )
 
-# add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_executable(${PROJECT_NAME}_node src/dm_node.cpp src/damiao.cpp)
+add_executable(${PROJECT_NAME} src/dm_node.cpp src/damiao.cpp)
+add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_generate_messages_cpp)
 
-target_link_libraries(${PROJECT_NAME}_node
+target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
   pthread
 )

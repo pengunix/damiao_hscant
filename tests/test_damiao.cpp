@@ -79,23 +79,23 @@ int main() {
     // 左侧小腿关节减去零位后取相反数
     // 速度、力矩同理，只取反即可
     // TODO(me): 封装状态数组以对应电机和索引，并完成姿态转换
-    std::vector<float> pos{
+    std::vector<float> pos {
         FL_M0->Get_Position(), FL_M1->Get_Position(), -FL_M2->Get_Position() - ZERO_POS,
         FR_M0->Get_Position(), -FR_M1->Get_Position(), FR_M2->Get_Position() - ZERO_POS,
-        BL_M0->Get_Position(), BL_M1->Get_Position(), -BL_M2->Get_Position() - ZERO_POS,
-        BR_M0->Get_Position(), -BR_M1->Get_Position(), BR_M2->Get_Position() - ZERO_POS};
+        -BL_M0->Get_Position(), BL_M1->Get_Position(), -BL_M2->Get_Position() - ZERO_POS,
+        -BR_M0->Get_Position(), -BR_M1->Get_Position(), BR_M2->Get_Position() - ZERO_POS};
 
-    std::vector<float> vel{
+    std::vector<float> vel {
         FL_M0->Get_Velocity(), FL_M1->Get_Velocity(), -FL_M2->Get_Velocity(),
         FR_M0->Get_Velocity(), -FR_M1->Get_Velocity(), FR_M2->Get_Velocity(),
-        BL_M0->Get_Velocity(), BL_M1->Get_Velocity(), -BL_M2->Get_Velocity(),
-        BR_M0->Get_Velocity(), -BR_M1->Get_Velocity(), BR_M2->Get_Velocity()};
+        -BL_M0->Get_Velocity(), BL_M1->Get_Velocity(), -BL_M2->Get_Velocity(),
+        -BR_M0->Get_Velocity(), -BR_M1->Get_Velocity(), BR_M2->Get_Velocity()};
     
-    std::vector<float> tau{
+    std::vector<float> tau {
         FL_M0->Get_tau(), FL_M1->Get_tau(), -FL_M2->Get_tau(),
         FR_M0->Get_tau(), -FR_M1->Get_tau(), FR_M2->Get_tau(),
-        BL_M0->Get_tau(), BL_M1->Get_tau(), -BL_M2->Get_tau(),
-        BR_M0->Get_tau(), -BR_M1->Get_tau(), BR_M2->Get_tau()};
+        -BL_M0->Get_tau(), BL_M1->Get_tau(), -BL_M2->Get_tau(),
+        -BR_M0->Get_tau(), -BR_M1->Get_tau(), BR_M2->Get_tau()};
 
     for (const auto &p : pos) {
       std::cout << p << "\t";

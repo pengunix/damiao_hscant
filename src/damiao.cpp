@@ -95,7 +95,7 @@ Motor_Control::Motor_Control(const std::string &serial_port,
 Motor_Control::~Motor_Control() {
   for (const auto &pair : motors) {
     Motor_id id = pair.first;
-    control_mit(*motors[id], 0, 0.3, 0, 0, 0);
+    control_mit(*motors[id], 0, 0.5, 0, 0, 0);
   }
 
   stop_update_thread_ = true;
