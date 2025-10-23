@@ -1,5 +1,18 @@
 #include "damiao.h"
-#include <iostream>
+
+#ifdef ROS_VERSION
+#include <ros/ros.h>
+#define LOGD(...) ROS_DEBUG(__VA_ARGS__)
+#define LOGI(...) ROS_INFO(__VA_ARGS__)
+#define LOGW(...) ROS_WARN(__VA_ARGS__)
+#define LOGE(...) ROS_ERROR(__VA_ARGS__)
+#else
+#define LOGD(...) printf(__VA_ARGS__);printf("\n")
+#define LOGI(...) printf(__VA_ARGS__);printf("\n")
+#define LOGW(...) printf(__VA_ARGS__);printf("\n")
+#define LOGE(...) printf(__VA_ARGS__);printf("\n")
+#endif
+
 namespace damiao {
 
 Limit_param limit_param[Num_Of_Motor] = {
@@ -70,7 +83,7 @@ bool Motor::is_have_param(int key) const {
   return param_map.find(key) != param_map.end();
 }
 
-Motor_Control::Motor_Control(const std::string &serial_port,
+Motor_Control::Motor_Control(const std::string &serial_port, const std::string &_can_port,
                              Serial::speed_t serial_baud) {
 
   // const std::unordered_map<Motor_id, DmActData>& dmact_data)
@@ -82,20 +95,20 @@ Motor_Control::Motor_Control(const std::string &serial_port,
   //                 item.second.mst_id); // 假设Motor的构造函数不需要参数
   //   addMotor(motor);
   // }
-
+  
   serial_ = std::make_unique<Serial::SerialPort>(serial_port, serial_baud);
+  hscant_init(_can_port);
+
   update_thread =
       std::thread(&Motor_Control::update_motor, this);
   stop_update_thread_ = false;
 
-  hscant_init(serial_port);
 }
 
-// TODO(me): 模块完成后检查类中是否有动态存储期成员需要释放
 Motor_Control::~Motor_Control() {
   for (const auto &pair : motors) {
     Motor_id id = pair.first;
-    control_mit(*motors[id], 0, 0.5, 0, 0, 0);
+    control_mit(*motors[id], 0, 5, 0, 0, 0);
   }
 
   stop_update_thread_ = true;
@@ -109,26 +122,9 @@ Motor_Control::~Motor_Control() {
   }
 }
 
-// TODO(me): 这个很不妙啊，需要改进
-std::string getPortString(const std::string &_port) {
-  static const std::unordered_map<std::string, std::string> portMap = {
-      {"/dev/ttyACM0", "r_can0"},
-      {"/dev/ttyACM1", "r_can1"},
-      {"/dev/ttyACM2", "r_can2"},
-      {"/dev/ttyACM3", "r_can3"}};
-
-  auto it = portMap.find(_port);
-  if (it != portMap.end()) {
-    return it->second;
-  }
-  // TODO(me): 增加logger，提示没有找到对应的端口，使用默认端口
-  return "r_can0";
-}
-
-void Motor_Control::hscant_init(const std::string &_port) {
+void Motor_Control::hscant_init(const std::string &_can_port) {
   // 初始化阶段不用同步队列发送
-  std::string cmd = getPortString(_port);
-  serial_->send((uint8_t *)cmd.data(), cmd.size());
+  serial_->send((uint8_t *)_can_port.data(), _can_port.size());
   usleep(200);
   // S8\r 选择波特率为1000000
   uint8_t data_buf0[3] = {'S', '8', '\r'};
@@ -156,7 +152,7 @@ void Motor_Control::enable() {
 }
 
 // 读电机反馈命令
-// TODO(me): 该api似乎没有效果，有控制指令用不到它，没控制指令又不会刷新数据
+// TODO(me): 数据包长度不对，发送数据包需要修改
 void Motor_Control::refresh_motor_status(const Motor &motor) {
   uint32_t id = 0x7FF;
   uint8_t can_low = motor.GetSlaveId() & 0xff;         // id low 8 bit
@@ -167,7 +163,7 @@ void Motor_Control::refresh_motor_status(const Motor &motor) {
   // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
   send_queue.try_push(send_data);
 }
-// TODO(me): 为啥还不行
+// TODO(me): 数据包长度不对，发送数据包需要修改
 void Motor_Control::refresh_allmotor_status() {
   uint32_t id = 0x7FF;
   for (auto &it : motors) {
@@ -207,8 +203,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
   };
   Motor_id id = motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
-    // TODO(me): 完全去掉异常，提示并终止程序即可
-    // FATAL error
+    LOGE("[damiao] Cant find motor with given id");
     // throw std::runtime_error("Motor_Control id not found");
   }
   auto &m = motors[id];
@@ -241,9 +236,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
 void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
-    // TODO(me): 完全去掉异常，提示并终止程序即可
-    // throw std::runtime_error("POS_VEL ERROR : Motor_Control id not found");
-    // FATAL error
+    LOGE("[damiao] Cant find motor with given id");
   }
   std::array<uint8_t, 8> data_buf{};
   memcpy(data_buf.data(), &pos, sizeof(float));
@@ -258,8 +251,7 @@ void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
 void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
-    // TODO(me): 完全去掉异常，提示并终止程序即可
-    // throw std::runtime_error("VEL ERROR : id not found");
+    LOGE("[damiao] Cant find motor with given id");
   }
   std::array<uint8_t, 8> data_buf = {0};
   memcpy(data_buf.data(), &vel, sizeof(float));
@@ -565,11 +557,12 @@ void Motor_Control::get_motor_data() {
     m->receive_data(receive_q, receive_dq, receive_tau);
   } else {
     // TODO(me): 提示错误接收帧
+    LOGW("[damiao] Reveive Frame error");
   }
 }
 
 
-
+// 以下是同步队列的实现
 template<typename T>
 Queue<T>::Queue() : shutdown_(false) {
 }

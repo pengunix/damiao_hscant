@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
   std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12);
   std::shared_ptr<damiao::Motor> FL_M2 =
   std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
-  damiao::Motor_Control dm_FL("/dev/ttyACM0", B921600);
+  damiao::Motor_Control dm_FL("/dev/serial/by-id/usb-HPMicro_USB_Virtual_COM_A02024030801-if00", "r_can0", B921600);
   std::array<std::shared_ptr<damiao::Motor>, 3> FL_M = {FL_M0, FL_M1, FL_M2};
   dm_FL.addMotor({FL_M0, FL_M1, FL_M2});
 
@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
       std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12);
   std::shared_ptr<damiao::Motor> FR_M2 =
       std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
-  damiao::Motor_Control dm_FR("/dev/ttyACM1", B921600);
+  damiao::Motor_Control dm_FR("/dev/serial/by-id/usb-HPMicro_USB_Virtual_COM_A02024030801-if02", "r_can1", B921600);
   std::array<std::shared_ptr<damiao::Motor>, 3> FR_M = {FR_M0, FR_M1, FR_M2};
   dm_FR.addMotor({FR_M0, FR_M1, FR_M2});
 
@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
       std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12);
   std::shared_ptr<damiao::Motor> BL_M2 =
       std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
-  damiao::Motor_Control dm_BL("/dev/ttyACM2", B921600);
+  damiao::Motor_Control dm_BL("/dev/serial/by-id/usb-HPMicro_USB_Virtual_COM_A02024030801-if04", "r_can2", B921600);
   std::array<std::shared_ptr<damiao::Motor>, 3> BL_M = {BL_M0, BL_M1, BL_M2};
   dm_BL.addMotor({BL_M0, BL_M1, BL_M2});
 
@@ -79,9 +79,25 @@ int main(int argc, char **argv) {
   std::shared_ptr<damiao::Motor> BR_M2 =
       std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
   std::array<std::shared_ptr<damiao::Motor>, 3> BR_M = {BR_M0, BR_M1, BR_M2};
-  damiao::Motor_Control dm_BR("/dev/ttyACM3", B921600);
+  damiao::Motor_Control dm_BR("/dev/serial/by-id/usb-HPMicro_USB_Virtual_COM_A02024030801-if06", "r_can3", B921600);
   dm_BR.addMotor({BR_M0, BR_M1, BR_M2});
-  // TODO(me): 打印初始化总结，各个电机的初始化状态
+
+  // 这里获取到的是原始位置，只要不为未初始化的0都代表电机初始化完成
+  std::vector<float> init_pos = {
+        FL_M0->Get_Position(), FL_M1->Get_Position(), FL_M2->Get_Position(),
+        FR_M0->Get_Position(), FR_M1->Get_Position(), FR_M2->Get_Position(),
+        BL_M0->Get_Position(), BL_M1->Get_Position(), BL_M2->Get_Position(),
+        BR_M0->Get_Position(), BR_M1->Get_Position(), BR_M2->Get_Position()};
+  ROS_INFO("=================================================");
+  for (int i=0;i<init_pos.size();i++) {
+      ROS_INFO("Motor %d Initial Position: %.4f", i, init_pos[i]);
+      if (init_pos[0] - 0.0 <= 0.0001) {
+          ROS_ERROR("Motor %d may not be connected properly!", i);
+          return 1;
+      }
+  }
+  ROS_INFO("Damiao Motor Node Initialized.");
+  ROS_INFO("=================================================");
 
   sleep(1);
   dm_FL.enable();
@@ -92,21 +108,8 @@ int main(int argc, char **argv) {
   FL_cmds[2].q = ZERO_POS;
   FR_cmds.fill({0,0,0,0,0});
   FR_cmds[2].q = ZERO_POS;
-
-  // 临时测试右前腿
-//   FR_cmds[0].q = -1.5;
-//   FR_cmds[1].q = 0.8;
-//   FR_cmds[2].q = -1.5;
-//   FR_cmds[2].kp = 2.0;
-
   BL_cmds.fill({0,0,0,0,0});
   BL_cmds[2].q = ZERO_POS;
-
-//   BL_cmds[0].q = 1.5;
-//   BL_cmds[1].q = 1.0;
-//   BL_cmds[2].q = -1.5;
-//   BL_cmds[2].kp = 1.0;
-
   BR_cmds.fill({0,0,0,0,0});
   BR_cmds[2].q = ZERO_POS;
 
@@ -149,7 +152,7 @@ int main(int argc, char **argv) {
     nodeHandle.subscribe("/dm_cmd", 128, callback);
 
   ros::Publisher MotorStatePub =
-    nodeHandle.advertise<dm_motor_ros::DmState>("/dm_state", 128);
+    nodeHandle.advertise<dm_motor_ros::DmState>("/dm_states", 128);
 
   ros::AsyncSpinner async_spinner(1);
   async_spinner.start();
