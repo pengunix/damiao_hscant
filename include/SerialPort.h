@@ -7,7 +7,20 @@
 #include <string>
 #include <cstring>
 #include <unistd.h>
-#include <iostream>
+
+#ifdef ROS_VERSION
+#include <ros/ros.h>
+#define LOGD(...) ROS_DEBUG(__VA_ARGS__)
+#define LOGI(...) ROS_INFO(__VA_ARGS__)
+#define LOGW(...) ROS_WARN(__VA_ARGS__)
+#define LOGE(...) ROS_ERROR(__VA_ARGS__)
+#else
+#define LOGD(...) printf(__VA_ARGS__);printf("\n")
+#define LOGI(...) printf(__VA_ARGS__);printf("\n")
+#define LOGW(...) printf(__VA_ARGS__);printf("\n")
+#define LOGE(...) printf(__VA_ARGS__);printf("\n")
+#endif
+
 
 namespace Serial {
 
@@ -45,15 +58,15 @@ public:
     switch (select(fd_ + 1, &rSet_, NULL, NULL, &timeout_)) {
     // TODO(me): 改logger
     case -1: // error
-      // std::cout << "communication error" << std::endl;
+      LOGW("[SerialPort] communication error");
       break;
     case 0: // timeout
-      // std::cout << "timeout" << std::endl;
+      LOGW("[SerialPort] Serial read timeout");
       break;
     default:
       recv_len = ::read(fd_, data, len);
       if (recv_len < 0) {
-        // std::cout << "read error" << std::endl;
+        LOGW("[SerialPort] read data error");
       }
       break;
     }
@@ -101,7 +114,7 @@ private:
     // Open serial port
     fd_ = open(port.c_str(), O_RDWR | O_NOCTTY);
     if (fd_ < 0) {
-      printf("Open serial port %s failed\n", port.c_str());
+      LOGW("[SerialPort] Open serial port %s failed", port.c_str());
       is_open = false;
       exit(-1);
     }

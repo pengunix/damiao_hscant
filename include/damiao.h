@@ -287,7 +287,7 @@ public:
    * @param serial 串口对象
    * 默认串口为/dev/ttyACM0
    */
-  Motor_Control(const std::string &serial_port, Serial::speed_t seial_baud);
+  Motor_Control(const std::string &serial_port, const std::string &_can_port, Serial::speed_t seial_baud);
     //  const std::unordered_map<Motor_id, DmActData>& dmact_data);
 
   ~Motor_Control();
@@ -299,7 +299,7 @@ public:
    */
   void enable();
 
-  void hscant_init(const std::string &_port);
+  void hscant_init(const std::string &_can_port);
   void hscant_deinit(const std::string &_port);
   // void write();
   // void read();
