@@ -8,7 +8,7 @@
 #include <cstring>
 #include <unistd.h>
 
-#ifdef ROS_VERSION
+#ifdef USE_ROS
 #include <ros/ros.h>
 #define LOGD(...) ROS_DEBUG(__VA_ARGS__)
 #define LOGI(...) ROS_INFO(__VA_ARGS__)

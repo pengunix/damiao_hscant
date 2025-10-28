@@ -1,8 +1,6 @@
 #include "SerialPort.h"
 #include <algorithm>
-#include <bits/stdint-uintn.h>
-#include <memory>
-#include <sys/types.h>
+#include <cstring>
 
 namespace HSCanT {
 #include <glob.h>
@@ -36,35 +34,46 @@ inline uint8_t hexChar2Nibble(uint8_t c) {
 class HSCanT_handler {
 public:
   HSCanT_handler(std::unique_ptr<Serial::SerialPort> &sptr)
-      : serial_ptr_(std::move(sptr)) {}
+      : serial_ptr_(std::move(sptr)) {
+    if (serial_ptr_ == nullptr || !serial_ptr_->is_Open()) {
+      LOGE("HSCanT_handler serial port is not valid");
+    }
+  }
   ~HSCanT_handler() {
     if (serial_ptr_->is_Open()) {
       serial_ptr_->close();
     }
   }
 
-  void send_frame(uint32_t id, std::array<uint8_t, 8> motor_frame) {
+  // 这里只发标准帧，扩展帧后续再加
+  void send_frame(uint32_t id, uint8_t *motor_frame, int size) {
     hscan_command_t send_buf;
     send_buf.command = 't';
+    // 默认size = 8
     send_buf.len = '8';
     send_buf.CR = '\r';
 
+    if (size != 8) {
+      LOGW("HSCanT send frame size mismatch");
+      return;
+    }
     // 发送电机id和数据
     send_buf.canId[0] = '0' + (id / 100);
     send_buf.canId[1] = '0' + ((id / 10) % 10);
     send_buf.canId[2] = '0' + (id % 10);
     for (int i = 0; i < 8; i++) {
-      uint8_t byte = motor_frame.at(i);
+      uint8_t byte = motor_frame[i];
       send_buf.data[2 * i] = hex2char[byte >> 4];       // 高4位
       send_buf.data[2 * i + 1] = hex2char[byte & 0x0F]; // 低4位
     }
     serial_ptr_->send((uint8_t *)&send_buf, sizeof(hscan_command_t));
   }
 
-  void recv_frame(uint32_t &id, std::array<uint8_t, 8> &data_buf) {
+  void recv_frame(uint32_t &id, uint8_t *data_buf, size_t buf_size) {
     hscan_command_t recv_cmd;
     serial_ptr_->recv((uint8_t *)&recv_cmd, sizeof(recv_cmd));
-    // 检查命令头和结束符
+    // 检查命令头和结束符，这里默认为标准can帧
+    // ! 改写扩展帧时注意这里
     if (recv_cmd.command != 't' || recv_cmd.len != '8' || recv_cmd.CR != '\r') {
       LOGW("HSCanT receive frame error");
       return;
@@ -80,7 +89,10 @@ public:
 
       data[i] = (highNibble << 4) | lowNibble;
     }
-    data_buf = data;
+    if (buf_size != data.size()) {
+      LOGW("HSCanT receive data buffer size mismatch");
+    }
+    memcpy(data_buf, data.data(), std::min(buf_size, data.size()));
     id = (uint32_t(recv_cmd.canId[0] - '0') * 100) +
          (uint32_t(recv_cmd.canId[1] - '0') * 10) +
          uint32_t(recv_cmd.canId[2] - '0');
@@ -121,6 +133,8 @@ public:
       }
     }
     valid_ = true;
+
+    assert(valid_);
   }
 
   ~HSCanT() {
@@ -130,6 +144,12 @@ public:
 
   // 此处移交了串口指针的所有权
   std::unique_ptr<HSCanT_handler> export_handler(int serial_index) {
+    if (valid_ == false || serial_index < 0 ||
+        serial_index >= serial_ptrs_.size() ||
+        serial_ptrs_[serial_index] == nullptr) {
+      LOGE("Export HSCanT ptr Error");
+      return nullptr;
+    }
     return std::make_unique<HSCanT_handler>(serial_ptrs_[serial_index]);
   }
 

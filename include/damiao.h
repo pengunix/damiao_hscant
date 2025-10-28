@@ -1,22 +1,42 @@
 #ifndef DAMIAO_H
 #define DAMIAO_H
 
-#include "SerialPort.h"
+#include "HSCanT.h"
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
+#include <mutex>
+#include <queue>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
-#include <atomic>
-#include <initializer_list>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
 
+#ifdef USE_ROS
+#include <ros/ros.h>
+#define LOGD(...) ROS_DEBUG(__VA_ARGS__)
+#define LOGI(...) ROS_INFO(__VA_ARGS__)
+#define LOGW(...) ROS_WARN(__VA_ARGS__)
+#define LOGE(...) ROS_ERROR(__VA_ARGS__)
+#else
+#define LOGD(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
+#define LOGI(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
+#define LOGW(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
+#define LOGE(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
+#endif
 
 #define POS_MODE 0x100
 #define SPEED_MODE 0x200
@@ -109,53 +129,46 @@ enum DM_REG {
   xout = 81,
 };
 
-// TODO(me): ascii 解析不完全，丢失电机错误码信息，更改hscant固件后再来完善
-#pragma pack(push, 1)
 typedef struct {
   uint8_t FrameHeader;
-  // uint8_t CMD;// 命令 0x00: 心跳
+  uint8_t CMD; // 命令 0x00: 心跳
   //     0x01: receive fail 0x11: receive success
   //     0x02: send fail 0x12: send success
   //     0x03: set baudrate fail 0x13: set baudrate success
   //     0xEE: communication error 此时格式段为错误码
   //     8: 超压 9: 欠压 A: 过流 B: MOS过温 C: 电机线圈过温 D: 通讯丢失 E: 过载
-  // uint8_t canDataLen: 6; // 数据长度
-  // uint8_t canIde: 1; // 0: 标准帧 1: 扩展帧
-  // uint8_t canRtr: 1; // 0: 数据帧 1: 远程帧
-  uint8_t canId[3]; // 电机反馈的ID
-  uint8_t len;      // len
-  uint8_t canData[16];
+  uint8_t canDataLen : 6; // 数据长度
+  uint8_t canIde : 1;     // 0: 标准帧 1: 扩展帧
+  uint8_t canRtr : 1;     // 0: 数据帧 1: 远程帧
+  uint32_t canId;         // 电机反馈的ID
+  uint8_t canData[8];
   uint8_t frameEnd; // 帧尾
-} CAN_Receive_Frame;
-#pragma pack(pop)
+} Can_Receive_Frame;
 
-// TODO(me)：发送改为透传模式
-typedef struct can_send_frame {
-  uint8_t FrameHeader = 0x74; // 帧头
-  uint8_t canId[3] = {0};     // CAN ID 使用电机ID作为CAN ID
-  uint8_t len = 0x38;         // len
-  uint8_t data[16] = {0};
-  uint8_t frameEnd = 0x0D;
+typedef struct {
+  uint8_t FrameHeader[2] = {0x55, 0xAA}; // 帧头
+  uint8_t FrameLen = 0x1e;               // 帧长
+  uint8_t CMD = 0x03; // 命令 1：转发CAN数据帧 2：PC与设备握手，设备反馈OK 3:
+                      // 非反馈CAN转发，不反馈发送状态
+  uint32_t sendTimes = 1;     // 发送次数
+  uint32_t timeInterval = 10; // 时间间隔
+  uint8_t IDType = 0;         // ID类型 0：标准帧 1：扩展帧
+  uint32_t canId = 0x01;      // CAN ID 使用电机ID作为CAN ID
+  uint8_t frameType = 0;      // 帧类型 0： 数据帧 1：远程帧
+  uint8_t len = 0x08;         // len
+  uint8_t idAcc = 0;
+  uint8_t dataAcc = 0;
+  uint8_t data[8] = {0};
+  uint8_t crc = 0; // 未解析，任意值
 
   void modify(const Motor_id id, const uint8_t *send_data) {
-    // canId = id;
-    // std::copy(send_data, send_data+8, data);
-
-    canId[0] = '0' + (id / 100);       // 百位
-    canId[1] = '0' + ((id / 10) % 10); // 十位
-    canId[2] = '0' + (id % 10);        // 个位
-    const char hexChars[] = "0123456789ABCDEF";
-    for (int i = 0; i < 8; i++) {
-      uint8_t byte = send_data[i];
-      data[2 * i] = hexChars[byte >> 4];       // 高4位
-      data[2 * i + 1] = hexChars[byte & 0x0F]; // 低4位
-    }
+    canId = id;
+    std::copy(send_data, send_data + 8, data);
   }
 
-} can_send_frame;
+} Can_Send_Frame;
 
 #pragma pack()
-
 typedef struct {
   float Q_MAX;
   float DQ_MAX;
@@ -250,29 +263,28 @@ public:
 
 // TODO(me): 实现电机意外断开连接的自动恢复机制
 // TODO(me): 可以试试链表实现的无锁队列
-template<typename T>
-class Queue {
+template <typename T> class Queue {
 private:
-    mutable std::mutex mutex_;
-    std::queue<T> queue_;
-    std::condition_variable cond_;
-    bool shutdown_;
+  mutable std::mutex mutex_;
+  std::queue<T> queue_;
+  std::condition_variable cond_;
+  bool shutdown_;
 
 public:
-    Queue();
-    ~Queue() = default;
-    
-    Queue(const Queue&) = delete;
-    Queue& operator=(const Queue&) = delete;
-    
-    bool try_push(T value);
-    bool try_pop(T& value);
-    bool pop(T& value);
-    size_t size() const;
-    bool empty() const;
-    void clear();
-    void shutdown();
-    bool is_shutdown() const;
+  Queue();
+  ~Queue() = default;
+
+  Queue(const Queue &) = delete;
+  Queue &operator=(const Queue &) = delete;
+
+  bool try_push(T value);
+  bool try_pop(T &value);
+  bool pop(T &value);
+  size_t size() const;
+  bool empty() const;
+  void clear();
+  void shutdown();
+  bool is_shutdown() const;
 };
 
 /**
@@ -284,11 +296,9 @@ class Motor_Control {
 public:
   /*
    * @brief 定义电机控制对象
-   * @param serial 串口对象
-   * 默认串口为/dev/ttyACM0
+   * @param hscant_handler HSCanT_handler对象
    */
-  Motor_Control(const std::string &serial_port, const std::string &_can_port, Serial::speed_t seial_baud);
-    //  const std::unordered_map<Motor_id, DmActData>& dmact_data);
+  Motor_Control(HSCanT::HSCanT_handler *hscant_handler);
 
   ~Motor_Control();
 
@@ -298,11 +308,8 @@ public:
    * @param motor 电机对象
    */
   void enable();
-
-  void hscant_init(const std::string &_can_port);
-  void hscant_deinit(const std::string &_port);
-  // void write();
-  // void read();
+  void write();
+  void read();
   /*
    * @brief refresh motor status 刷新电机状态
    * @param motor object 电机对象
@@ -325,13 +332,10 @@ public:
 
   void receive_param();
 
-  
-
   /**
    * @brief add motor to class 添加电机
    * @param DM_Motor : motor object 电机对象
    */
-  // void addMotor(Motor *DM_Motor);
   void addMotor(std::initializer_list<std::shared_ptr<Motor>> Motor_list);
 
   /*
@@ -407,20 +411,19 @@ private:
     memcpy(&result, &combined, sizeof(result));
     return result;
   }
-  // std::unique_ptr<std::thread> rec_thread;
   std::thread update_thread;
   std::atomic<bool> stop_update_thread_;
 
   std::unordered_map<Motor_id, std::shared_ptr<Motor>> motors;
-  std::unique_ptr<Serial::SerialPort> serial_;
-  Queue<can_send_frame> send_queue;
-  
+  HSCanT::HSCanT_handler *hscant_handler;
+  Queue<Can_Send_Frame> send_queue;
+
   // ! 似乎是一个由用户维护的数据，用于集中管理单个串口的多个电机
   // ! 配套的api有MotorContorl构造函数、write、read函数
   // TODO(me): 暂时不用像这样暴露整个数据，后续修改
   std::unordered_map<Motor_id, DmActData> dmact_data;
-  can_send_frame send_data;         // send data frame
-  CAN_Receive_Frame receive_data{}; // receive data frame
+  Can_Send_Frame send_data;         // send data frame
+  Can_Receive_Frame receive_data{}; // receive data frame
 };
 
 }; // namespace damiao

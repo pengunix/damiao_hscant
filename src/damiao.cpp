@@ -1,17 +1,5 @@
 #include "damiao.h"
-
-#ifdef ROS_VERSION
-#include <ros/ros.h>
-#define LOGD(...) ROS_DEBUG(__VA_ARGS__)
-#define LOGI(...) ROS_INFO(__VA_ARGS__)
-#define LOGW(...) ROS_WARN(__VA_ARGS__)
-#define LOGE(...) ROS_ERROR(__VA_ARGS__)
-#else
-#define LOGD(...) printf(__VA_ARGS__);printf("\n")
-#define LOGI(...) printf(__VA_ARGS__);printf("\n")
-#define LOGW(...) printf(__VA_ARGS__);printf("\n")
-#define LOGE(...) printf(__VA_ARGS__);printf("\n")
-#endif
+#include <bits/stdint-uintn.h>
 
 namespace damiao {
 
@@ -83,8 +71,8 @@ bool Motor::is_have_param(int key) const {
   return param_map.find(key) != param_map.end();
 }
 
-Motor_Control::Motor_Control(const std::string &serial_port, const std::string &_can_port,
-                             Serial::speed_t serial_baud) {
+Motor_Control::Motor_Control(HSCanT::HSCanT_handler *hscant_handler)
+    : hscant_handler(hscant_handler) {
 
   // const std::unordered_map<Motor_id, DmActData>& dmact_data)
   //   : dmact_data(dmact_data) {
@@ -95,14 +83,9 @@ Motor_Control::Motor_Control(const std::string &serial_port, const std::string &
   //                 item.second.mst_id); // 假设Motor的构造函数不需要参数
   //   addMotor(motor);
   // }
-  
-  serial_ = std::make_unique<Serial::SerialPort>(serial_port, serial_baud);
-  hscant_init(_can_port);
 
-  update_thread =
-      std::thread(&Motor_Control::update_motor, this);
+  update_thread = std::thread(&Motor_Control::update_motor, this);
   stop_update_thread_ = false;
-
 }
 
 Motor_Control::~Motor_Control() {
@@ -116,34 +99,7 @@ Motor_Control::~Motor_Control() {
   if (update_thread.joinable()) {
     update_thread.join();
   }
-
-  if (serial_->is_Open()) {
-    serial_->close();
-  }
 }
-
-void Motor_Control::hscant_init(const std::string &_can_port) {
-  // 初始化阶段不用同步队列发送
-  serial_->send((uint8_t *)_can_port.data(), _can_port.size());
-  usleep(200);
-  // S8\r 选择波特率为1000000
-  uint8_t data_buf0[3] = {'S', '8', '\r'};
-  serial_->send((uint8_t *)&data_buf0, sizeof(data_buf0));
-  usleep(200);
-
-  // U1\r
-  uint8_t data_buf1[3] = {'U', '1', '\r'};
-  serial_->send((uint8_t *)&data_buf1, sizeof(data_buf1));
-  usleep(200);
-
-  // O\r
-  uint8_t data_buf2[2] = {'O', '\r'};
-  serial_->send((uint8_t *)&data_buf2, sizeof(data_buf2));
-  usleep(200);
-}
-
-// TODO(me): 实现四路can口的deinit
-void Motor_Control::hscant_deinit(const std::string &_port) {}
 
 void Motor_Control::enable() {
   for (auto &it : motors) {
@@ -151,8 +107,6 @@ void Motor_Control::enable() {
   }
 }
 
-// 读电机反馈命令
-// TODO(me): 数据包长度不对，发送数据包需要修改
 void Motor_Control::refresh_motor_status(const Motor &motor) {
   uint32_t id = 0x7FF;
   uint8_t can_low = motor.GetSlaveId() & 0xff;         // id low 8 bit
@@ -175,7 +129,6 @@ void Motor_Control::refresh_allmotor_status() {
     send_data.modify(id, data_buf.data());
     // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
     send_queue.try_push(send_data);
-    usleep(200);
   }
 }
 
@@ -188,7 +141,6 @@ void Motor_Control::disable() {
 void Motor_Control::set_zero_position() {
   for (auto &it : motors) {
     control_cmd(it.second->GetSlaveId(), 0xFE);
-    usleep(2000);
   }
 }
 
@@ -204,6 +156,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
   Motor_id id = motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
     LOGE("[damiao] Cant find motor with given id");
+    return;
     // throw std::runtime_error("Motor_Control id not found");
   }
   auto &m = motors[id];
@@ -230,13 +183,13 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
   send_data.modify(id, data_buf.data());
   // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
   send_queue.try_push(send_data);
-  usleep(200);
 }
 
 void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
     LOGE("[damiao] Cant find motor with given id");
+    return;
   }
   std::array<uint8_t, 8> data_buf{};
   memcpy(data_buf.data(), &pos, sizeof(float));
@@ -244,7 +197,7 @@ void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
   id += POS_MODE;
   send_data.modify(id, data_buf.data());
   // serial_->send(reinterpret_cast<uint8_t *>(&send_data),
-                // sizeof(can_send_frame));
+  // sizeof(can_send_frame));
   send_queue.try_push(send_data);
 }
 
@@ -252,6 +205,7 @@ void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
     LOGE("[damiao] Cant find motor with given id");
+    return;
   }
   std::array<uint8_t, 8> data_buf = {0};
   memcpy(data_buf.data(), &vel, sizeof(float));
@@ -261,10 +215,8 @@ void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
   send_queue.try_push(send_data);
 }
 
-// TODO(me): 数据包修正
 void Motor_Control::receive_param() {
-  // 待修正，临时终止函数运行
-  return;
+  // ? 达妙在这里注释了主动接收，不明白为什么
 
   if (receive_data.FrameHeader == 0x11 &&
       receive_data.frameEnd == 0x55) // receive success
@@ -295,17 +247,12 @@ void Motor_Control::receive_param() {
  * @brief add motor to class 添加电机
  * @param DM_Motor : motor object 电机对象的地址
  */
-// void Motor_Control::addMotor(Motor *DM_Motor) {
-//   motors.insert({DM_Motor->GetSlaveId(), DM_Motor});
-//   motors.insert({DM_Motor->GetMasterId(), DM_Motor});
-// }
 
 void Motor_Control::addMotor(
     std::initializer_list<std::shared_ptr<Motor>> Motor_list) {
-  for (const auto &motor_ptr : Motor_list) {
-    // TODO(me); 检查电机初始化状态
-    motors.insert({motor_ptr->GetSlaveId(), motor_ptr});
-    motors.insert({motor_ptr->GetMasterId(), motor_ptr});
+  for (const auto &motor : Motor_list) {
+    motors.insert({motor->GetSlaveId(), motor});
+    motors.insert({motor->GetMasterId(), motor});
   }
   disable();
 }
@@ -391,7 +338,7 @@ bool Motor_Control::change_motor_param(Motor &DM_Motor, uint8_t RID,
   }
   for (uint8_t i = 0; i < max_retries; i++) {
     usleep(retry_interval);
-    // receive_param();
+    receive_param();
     if (motors[DM_Motor.GetSlaveId()]->is_have_param(RID)) {
       if (is_in_ranges(RID)) {
         return motors[DM_Motor.GetSlaveId()]->get_param_as_uint32(RID) ==
@@ -420,7 +367,6 @@ void Motor_Control::save_motor_param(Motor &DM_Motor) {
   send_data.modify(0x7FF, data_buf.data());
   // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
   send_queue.try_push(send_data);
-  usleep(100000); // 100ms wait for save
 }
 
 /*
@@ -442,7 +388,6 @@ void Motor_Control::control_cmd(Motor_id id, uint8_t cmd) {
   send_data.modify(id, data_buf.data());
   // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
   send_queue.try_push(send_data);
-  usleep(200);
 }
 
 void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
@@ -457,64 +402,49 @@ void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
   data_buf[6] = data[2];
   data_buf[7] = data[3];
   send_data.modify(0x7FF, data_buf.data());
-
-  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
   send_queue.try_push(send_data);
 }
 
 // 所有发送数据集中在这里，不阻塞主线程
 void Motor_Control::update_motor() {
   while (!stop_update_thread_) {
-    can_send_frame frame;
+    Can_Send_Frame frame;
     if (send_queue.pop(frame)) {
-      serial_->send((uint8_t *)&frame, sizeof(can_send_frame));
+      hscant_handler->send_frame(frame.canId, frame.data, 8);
       get_motor_data();
     }
   }
 }
 
-// void Motor_Control::write() {
-//   for (const auto &m : dmact_data) {
-//     int motor_id = m.first; //这里指的是can_id
-//     if (motors.find(motor_id) == motors.end()) {
-//     }
-//     auto &it = motors[motor_id];
+void Motor_Control::write() {
+  for (const auto &m : dmact_data) {
+    int motor_id = m.first; // can_id
+    if (motors.find(motor_id) == motors.end()) {
+    }
+    auto &it = motors[motor_id];
 
-//     control_mit(*it, m.second.kp, m.second.kd, m.second.cmd_pos,
-//                 m.second.cmd_vel,
-//                 m.second.cmd_effort);
-//   }
-// }
+    control_mit(*it, m.second.kp, m.second.kd, m.second.cmd_pos,
+                m.second.cmd_vel, m.second.cmd_effort);
+  }
+}
 
-// void Motor_Control::read() {
-//   for (auto &m : dmact_data) {
-//     int motor_id = m.first; //这里指的是can_id
-//     if (motors.find(motor_id) == motors.end()) {
-//     }
-//     auto &it = motors[motor_id];
+void Motor_Control::read() {
+  for (auto &m : dmact_data) {
+    int motor_id = m.first; //这里指的是can_id
+    if (motors.find(motor_id) == motors.end()) {
+    }
+    auto &it = motors[motor_id];
 
-//     m.second.pos = it->Get_Position();
-//     m.second.vel = it->Get_Velocity();
-//     m.second.effort = it->Get_tau();
-
-//   }
-// }
-
-// TODO(me): 修改hscant固件，支持透传模式，删除ascii转换逻辑
-uint8_t hexCharToNibble(uint8_t c) {
-  if (c >= '0' && c <= '9')
-    return c - '0';
-  if (c >= 'A' && c <= 'F')
-    return 10 + (c - 'A');
-  if (c >= 'a' && c <= 'f')
-    return 10 + (c - 'a'); // 支持小写
-  return 0;                // 处理无效字符
+    m.second.pos = it->Get_Position();
+    m.second.vel = it->Get_Velocity();
+    m.second.effort = it->Get_tau();
+  }
 }
 
 void Motor_Control::get_motor_data() {
-  serial_->recv((uint8_t *)&receive_data, sizeof(CAN_Receive_Frame));
+  hscant_handler->recv_frame(receive_data.canId, receive_data.canData, 8);
 
-  if (receive_data.FrameHeader == 0x74 && receive_data.frameEnd == 0x0D) {
+  if (receive_data.FrameHeader == 0x11 && receive_data.frameEnd == 0x55) {
     static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
                                    uint8_t bits) -> float {
       float span = xmax - xmin;
@@ -523,29 +453,16 @@ void Motor_Control::get_motor_data() {
       return data;
     };
 
-    uint8_t data[8];
-    for (int i = 0; i < 8; i++) {
-      uint8_t highChar = receive_data.canData[2 * i];
-      uint8_t lowChar = receive_data.canData[2 * i + 1];
-
-      uint8_t highNibble = hexCharToNibble(highChar);
-      uint8_t lowNibble = hexCharToNibble(lowChar);
-
-      data[i] = (highNibble << 4) | lowNibble;
-    }
+    auto &data = receive_data.canData;
 
     uint16_t q_uint = (uint16_t(data[1]) << 8) | data[2];
     uint16_t dq_uint = (uint16_t(data[3]) << 4) | (data[4] >> 4);
     uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
 
-    uint32_t canId = (hexCharToNibble(receive_data.canId[0]) << 8) |
-                     (hexCharToNibble(receive_data.canId[1]) << 4) |
-                     hexCharToNibble(receive_data.canId[2]);
-
-    if (motors.find(canId) == motors.end()) {
+    if (motors.find(receive_data.canId) == motors.end()) {
       return;
     }
-    auto m = motors[canId];
+    auto m = motors[receive_data.canId];
     Limit_param limit_param_receive = m->get_limit_param();
     float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX,
                                     limit_param_receive.Q_MAX, 16);
@@ -555,102 +472,95 @@ void Motor_Control::get_motor_data() {
                                       limit_param_receive.TAU_MAX, 12);
 
     m->receive_data(receive_q, receive_dq, receive_tau);
+
   } else {
-    // TODO(me): 提示错误接收帧
-    LOGW("[damiao] Reveive Frame error");
+    LOGW("[damiao] Receive Frame error");
+
+    //   for (int i = 0; i < sizeof(receive_data.canData); i++) {
+    //     printf("0x%02X ", receive_data.canData[i]);
+    //   }
+    //   printf("\n");
+    // }
   }
 }
 
-
 // 以下是同步队列的实现
-template<typename T>
-Queue<T>::Queue() : shutdown_(false) {
-}
+template <typename T> Queue<T>::Queue() : shutdown_(false) {}
 
 // 非阻塞推送
-template<typename T>
-bool Queue<T>::try_push(T value) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (shutdown_) {
-        return false;
-    }
-    
-    queue_.push(std::move(value));
-    cond_.notify_one();
-    return true;
+template <typename T> bool Queue<T>::try_push(T value) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (shutdown_) {
+    return false;
+  }
+
+  queue_.push(std::move(value));
+  cond_.notify_one();
+  return true;
 }
 
 // 非阻塞获取
-template<typename T>
-bool Queue<T>::try_pop(T& value) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (queue_.empty() || shutdown_) {
-        return false;
-    }
-    
-    value = std::move(queue_.front());
-    queue_.pop();
-    return true;
+template <typename T> bool Queue<T>::try_pop(T &value) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (queue_.empty() || shutdown_) {
+    return false;
+  }
+
+  value = std::move(queue_.front());
+  queue_.pop();
+  return true;
 }
 
 // 阻塞获取
-template<typename T>
-bool Queue<T>::pop(T& value) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    
-    cond_.wait(lock, [this]() { 
-        return !queue_.empty() || shutdown_; 
-    });
-    
-    if (shutdown_ && queue_.empty()) {
-        return false;
-    }
-    
-    value = std::move(queue_.front());
-    queue_.pop();
-    return true;
+template <typename T> bool Queue<T>::pop(T &value) {
+  std::unique_lock<std::mutex> lock(mutex_);
+
+  cond_.wait(lock, [this]() { return !queue_.empty() || shutdown_; });
+
+  if (shutdown_ && queue_.empty()) {
+    return false;
+  }
+
+  value = std::move(queue_.front());
+  queue_.pop();
+  return true;
 }
 
 // 队列大小
-template<typename T>
-size_t Queue<T>::size() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return queue_.size();
+template <typename T> size_t Queue<T>::size() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return queue_.size();
 }
 
 // 队列是否为空
-template<typename T>
-bool Queue<T>::empty() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return queue_.empty();
+template <typename T> bool Queue<T>::empty() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return queue_.empty();
 }
 
 // 清空队列
-template<typename T>
-void Queue<T>::clear() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    while (!queue_.empty()) {
-        queue_.pop();
-    }
+template <typename T> void Queue<T>::clear() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  while (!queue_.empty()) {
+    queue_.pop();
+  }
 }
 
 // 关闭队列
-template<typename T>
-void Queue<T>::shutdown() {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        shutdown_ = true;
-    }
-    cond_.notify_all();
+template <typename T> void Queue<T>::shutdown() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    shutdown_ = true;
+  }
+  cond_.notify_all();
 }
 
 // 检查是否已关闭
-template<typename T>
-bool Queue<T>::is_shutdown() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return shutdown_;
+template <typename T> bool Queue<T>::is_shutdown() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return shutdown_;
 }
 
 } // namespace damiao
