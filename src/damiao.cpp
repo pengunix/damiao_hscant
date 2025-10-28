@@ -1,5 +1,7 @@
 #include "damiao.h"
+#include "SerialPort.h"
 #include <bits/stdint-uintn.h>
+#include <unistd.h>
 
 namespace damiao {
 
@@ -103,7 +105,10 @@ Motor_Control::~Motor_Control() {
 
 void Motor_Control::enable() {
   for (auto &it : motors) {
-    control_cmd(it.second->GetSlaveId(), 0xFC);
+    for (int i = 0; i < 10; i++) {
+      control_cmd(it.second->GetSlaveId(), 0xFC);
+      usleep(150);
+    }
   }
 }
 
@@ -134,7 +139,10 @@ void Motor_Control::refresh_allmotor_status() {
 
 void Motor_Control::disable() {
   for (auto &it : motors) {
-    control_cmd(it.second->GetSlaveId(), 0xFD);
+    for (int i = 0; i < 10; i++) {
+      control_cmd(it.second->GetSlaveId(), 0xFD);
+      usleep(150);
+    }
   }
 }
 
@@ -382,12 +390,14 @@ void Motor_Control::changeMotorLimit(Motor &DM_Motor, float P_MAX, float Q_MAX,
   limit_param[DM_Motor.GetMotorType()] = {P_MAX, Q_MAX, T_MAX};
 }
 
+// 单指令不用同步队列
 void Motor_Control::control_cmd(Motor_id id, uint8_t cmd) {
   std::array<uint8_t, 8> data_buf = {0xff, 0xff, 0xff, 0xff,
                                      0xff, 0xff, 0xff, cmd};
   send_data.modify(id, data_buf.data());
   // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
-  send_queue.try_push(send_data);
+  // send_queue.try_push(send_data);
+  hscant_handler->send_frame(send_data.canId, send_data.data, 8);
 }
 
 void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
@@ -444,7 +454,9 @@ void Motor_Control::read() {
 void Motor_Control::get_motor_data() {
   hscant_handler->recv_frame(receive_data.canId, receive_data.canData, 8);
 
-  if (receive_data.FrameHeader == 0x11 && receive_data.frameEnd == 0x55) {
+  // 电机状态码为0x11是正常接收
+  // TODO(me): 状态码判断
+  if (receive_data.canData[0] == 0x11) {
     static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
                                    uint8_t bits) -> float {
       float span = xmax - xmin;
@@ -460,6 +472,7 @@ void Motor_Control::get_motor_data() {
     uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
 
     if (motors.find(receive_data.canId) == motors.end()) {
+      LOGW("[damiao] Cant find motor by id");
       return;
     }
     auto m = motors[receive_data.canId];
@@ -472,15 +485,16 @@ void Motor_Control::get_motor_data() {
                                       limit_param_receive.TAU_MAX, 12);
 
     m->receive_data(receive_q, receive_dq, receive_tau);
+  } else if (receive_data.canData[0] == 0x01) {
+    // 接收错误
 
   } else {
     LOGW("[damiao] Receive Frame error");
 
-    //   for (int i = 0; i < sizeof(receive_data.canData); i++) {
-    //     printf("0x%02X ", receive_data.canData[i]);
-    //   }
-    //   printf("\n");
-    // }
+    for (int i = 0; i < sizeof(receive_data.canData); i++) {
+      printf("0x%02X ", receive_data.canData[i]);
+    }
+    printf("\n");
   }
 }
 

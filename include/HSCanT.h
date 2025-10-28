@@ -1,9 +1,14 @@
+#pragma once
 #include "SerialPort.h"
 #include <algorithm>
 #include <cstring>
 
 namespace HSCanT {
+
+extern "C" {
+#include <assert.h>
 #include <glob.h>
+}
 
 // 串口节点前缀，使用四路can都是这个前缀
 constexpr char SERIAL_PREFIX[] =
@@ -36,7 +41,7 @@ public:
   HSCanT_handler(std::unique_ptr<Serial::SerialPort> &sptr)
       : serial_ptr_(std::move(sptr)) {
     if (serial_ptr_ == nullptr || !serial_ptr_->is_Open()) {
-      LOGE("HSCanT_handler serial port is not valid");
+      LOGE("[HSCanT_handler] serial port is not valid");
     }
   }
   ~HSCanT_handler() {
@@ -54,7 +59,7 @@ public:
     send_buf.CR = '\r';
 
     if (size != 8) {
-      LOGW("HSCanT send frame size mismatch");
+      LOGW("[HSCanT] send frame size mismatch");
       return;
     }
     // 发送电机id和数据
@@ -75,7 +80,8 @@ public:
     // 检查命令头和结束符，这里默认为标准can帧
     // ! 改写扩展帧时注意这里
     if (recv_cmd.command != 't' || recv_cmd.len != '8' || recv_cmd.CR != '\r') {
-      LOGW("HSCanT receive frame error");
+      LOGW("[HSCanT] receive frame error");
+
       return;
     }
 
@@ -90,12 +96,12 @@ public:
       data[i] = (highNibble << 4) | lowNibble;
     }
     if (buf_size != data.size()) {
-      LOGW("HSCanT receive data buffer size mismatch");
+      LOGW("[HSCanT] receive data buffer size mismatch");
     }
     memcpy(data_buf, data.data(), std::min(buf_size, data.size()));
-    id = (uint32_t(recv_cmd.canId[0] - '0') * 100) +
-         (uint32_t(recv_cmd.canId[1] - '0') * 10) +
-         uint32_t(recv_cmd.canId[2] - '0');
+    id = (hexChar2Nibble(recv_cmd.canId[0]) << 8) |
+         (hexChar2Nibble(recv_cmd.canId[1]) << 4) |
+         hexChar2Nibble(recv_cmd.canId[2]);
   }
 
 private:
@@ -118,7 +124,7 @@ public:
       serial_ptrs_.push_back(std::move(serial_ptr));
 
       if (!serial_ptrs_.back()->is_Open()) {
-        LOGE("Failed to open serial port %s", device.c_str());
+        LOGE("[HSCanT] Failed to open serial port %s", device.c_str());
         valid_ = false;
         return;
       }
@@ -127,7 +133,8 @@ public:
     for (int i = 0; i < serial_ptrs_.size(); i++) {
       // 使用索引初始化HPM端口名
       if (!hscant_start_transmit(serial_ptrs_[i], '0' + i)) {
-        LOGE("Failed to start transmit on port %s", serial_devices_[i].c_str());
+        LOGE("[HSCanT] Failed to start transmit on port %s",
+             serial_devices_[i].c_str());
         valid_ = false;
         return;
       }
@@ -139,7 +146,7 @@ public:
 
   ~HSCanT() {
     // 此类已经没有串口指针的所有权，应从HSCanT_handler销毁串口
-    LOGI("HSCanT Exited!!");
+    LOGI("[HSCanT] Exited!!");
   }
 
   // 此处移交了串口指针的所有权
@@ -147,7 +154,7 @@ public:
     if (valid_ == false || serial_index < 0 ||
         serial_index >= serial_ptrs_.size() ||
         serial_ptrs_[serial_index] == nullptr) {
-      LOGE("Export HSCanT ptr Error");
+      LOGE("[HSCanT] Export HSCanT ptr Error");
       return nullptr;
     }
     return std::make_unique<HSCanT_handler>(serial_ptrs_[serial_index]);
@@ -163,10 +170,10 @@ private:
     if (ret == 0) {
       for (size_t i = 0; i < glob_result.gl_pathc; ++i) {
         serial_devices_.push_back(glob_result.gl_pathv[i]);
-        LOGI("Find available device: %s", glob_result.gl_pathv[i]);
+        LOGI("[HSCanT] Find available device: %s", glob_result.gl_pathv[i]);
       }
     } else {
-      LOGE("No serial devices found with prefix %s", SERIAL_PREFIX);
+      LOGE("[HSCanT] No serial devices found with prefix %s", SERIAL_PREFIX);
     }
 
     // 按照最后一位数字字符排序，保证初始化顺序
@@ -190,10 +197,10 @@ private:
     // 接收返回字符串判断usb通信是否正常，一般回复HPM_CANx_BUS共12字节
     int reply_len = sptr->recv(recv_buf, 12);
     if (reply_len != 12) {
-      LOGE("CAN Port didnt reply");
+      LOGE("[HSCanT] CAN Port didnt reply");
       return false;
     }
-    LOGI("PORT %s Initialized", recv_buf);
+    LOGI("[HSCanT] PORT %s Initialized", recv_buf);
 
     // S8\r 选择波特率为1000000
     sptr->send((uint8_t *)"S8\r", 3);

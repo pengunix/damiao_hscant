@@ -17,27 +17,6 @@
 #include <variant>
 #include <vector>
 
-#ifdef USE_ROS
-#include <ros/ros.h>
-#define LOGD(...) ROS_DEBUG(__VA_ARGS__)
-#define LOGI(...) ROS_INFO(__VA_ARGS__)
-#define LOGW(...) ROS_WARN(__VA_ARGS__)
-#define LOGE(...) ROS_ERROR(__VA_ARGS__)
-#else
-#define LOGD(...)                                                              \
-  printf(__VA_ARGS__);                                                         \
-  printf("\n")
-#define LOGI(...)                                                              \
-  printf(__VA_ARGS__);                                                         \
-  printf("\n")
-#define LOGW(...)                                                              \
-  printf(__VA_ARGS__);                                                         \
-  printf("\n")
-#define LOGE(...)                                                              \
-  printf(__VA_ARGS__);                                                         \
-  printf("\n")
-#endif
-
 #define POS_MODE 0x100
 #define SPEED_MODE 0x200
 #define POSI_MODE 0x300

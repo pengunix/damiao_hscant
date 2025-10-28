@@ -2,10 +2,10 @@
 #define SERIAL_PORT_H
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <memory>
 #include <queue>
 #include <string>
-#include <cstring>
 #include <unistd.h>
 
 #ifdef USE_ROS
@@ -15,12 +15,19 @@
 #define LOGW(...) ROS_WARN(__VA_ARGS__)
 #define LOGE(...) ROS_ERROR(__VA_ARGS__)
 #else
-#define LOGD(...) printf(__VA_ARGS__);printf("\n")
-#define LOGI(...) printf(__VA_ARGS__);printf("\n")
-#define LOGW(...) printf(__VA_ARGS__);printf("\n")
-#define LOGE(...) printf(__VA_ARGS__);printf("\n")
+#define LOGD(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
+#define LOGI(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
+#define LOGW(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
+#define LOGE(...)                                                              \
+  printf(__VA_ARGS__);                                                         \
+  printf("\n")
 #endif
-
 
 namespace Serial {
 
@@ -56,7 +63,6 @@ public:
     ssize_t recv_len = 0;
 
     switch (select(fd_ + 1, &rSet_, NULL, NULL, &timeout_)) {
-    // TODO(me): 改logger
     case -1: // error
       LOGW("[SerialPort] communication error");
       break;
