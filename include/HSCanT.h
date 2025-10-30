@@ -54,10 +54,10 @@ public:
   void send_frame(uint32_t id, uint8_t *motor_frame, int size) {
     hscan_command_t send_buf;
     send_buf.command = 't';
-    // 默认size = 8
-    send_buf.len = '8';
+    send_buf.len = '0' + size;
     send_buf.CR = '\r';
 
+    // 默认size = 8
     if (size != 8) {
       LOGW("[HSCanT] send frame size mismatch");
       return;
@@ -66,7 +66,7 @@ public:
     send_buf.canId[0] = '0' + (id / 100);
     send_buf.canId[1] = '0' + ((id / 10) % 10);
     send_buf.canId[2] = '0' + (id % 10);
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < size; i++) {
       uint8_t byte = motor_frame[i];
       send_buf.data[2 * i] = hex2char[byte >> 4];       // 高4位
       send_buf.data[2 * i + 1] = hex2char[byte & 0x0F]; // 低4位
@@ -80,7 +80,7 @@ public:
     // 检查命令头和结束符，这里默认为标准can帧
     // ! 改写扩展帧时注意这里
     if (recv_cmd.command != 't' || recv_cmd.len != '8' || recv_cmd.CR != '\r') {
-      LOGW("[HSCanT] receive frame error");
+      LOGW("[HSCanT] Receive Frame error");
 
       return;
     }

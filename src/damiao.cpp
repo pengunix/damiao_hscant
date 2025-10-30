@@ -1,6 +1,8 @@
 #include "damiao.h"
 #include "SerialPort.h"
 #include <bits/stdint-uintn.h>
+#include <boost/integer_fwd.hpp>
+#include <cstdio>
 #include <unistd.h>
 
 namespace damiao {
@@ -91,9 +93,11 @@ Motor_Control::Motor_Control(HSCanT::HSCanT_handler *hscant_handler)
 }
 
 Motor_Control::~Motor_Control() {
+  LOGW("Motor_Control Exited");
   for (const auto &pair : motors) {
     Motor_id id = pair.first;
     control_mit(*motors[id], 0, 5, 0, 0, 0);
+    usleep(200);
   }
 
   stop_update_thread_ = true;
@@ -107,7 +111,7 @@ void Motor_Control::enable() {
   for (auto &it : motors) {
     for (int i = 0; i < 10; i++) {
       control_cmd(it.second->GetSlaveId(), 0xFC);
-      usleep(150);
+      usleep(200);
     }
   }
 }
@@ -422,6 +426,9 @@ void Motor_Control::update_motor() {
     if (send_queue.pop(frame)) {
       hscant_handler->send_frame(frame.canId, frame.data, 8);
       get_motor_data();
+      // 这里能解决超时问题，can发太快会过度占用总线
+      // TODO(me): 尝试使用计数信号量优化，提高总线利用率
+      usleep(200);
     }
   }
 }
@@ -453,49 +460,37 @@ void Motor_Control::read() {
 
 void Motor_Control::get_motor_data() {
   hscant_handler->recv_frame(receive_data.canId, receive_data.canData, 8);
+  // TODO(me): 状态码判断，receive_data.CMD只有使用达妙的can才能用
+  // 这里去掉CMD判断，默认由HSCanT类处理
+  // 电机故障码在canData[0]里，高
+  static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
+                                  uint8_t bits) -> float {
+    float span = xmax - xmin;
+    float data_norm = float(x) / ((1 << bits) - 1);
+    float data = data_norm * span + xmin;
+    return data;
+  };
 
-  // 电机状态码为0x11是正常接收
-  // TODO(me): 状态码判断
-  if (receive_data.canData[0] == 0x11) {
-    static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
-                                   uint8_t bits) -> float {
-      float span = xmax - xmin;
-      float data_norm = float(x) / ((1 << bits) - 1);
-      float data = data_norm * span + xmin;
-      return data;
-    };
+  auto &data = receive_data.canData;
 
-    auto &data = receive_data.canData;
+  uint16_t q_uint = (uint16_t(data[1]) << 8) | data[2];
+  uint16_t dq_uint = (uint16_t(data[3]) << 4) | (data[4] >> 4);
+  uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
 
-    uint16_t q_uint = (uint16_t(data[1]) << 8) | data[2];
-    uint16_t dq_uint = (uint16_t(data[3]) << 4) | (data[4] >> 4);
-    uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
-
-    if (motors.find(receive_data.canId) == motors.end()) {
-      LOGW("[damiao] Cant find motor by id");
-      return;
-    }
-    auto m = motors[receive_data.canId];
-    Limit_param limit_param_receive = m->get_limit_param();
-    float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX,
-                                    limit_param_receive.Q_MAX, 16);
-    float receive_dq = uint_to_float(dq_uint, -limit_param_receive.DQ_MAX,
-                                     limit_param_receive.DQ_MAX, 12);
-    float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX,
-                                      limit_param_receive.TAU_MAX, 12);
-
-    m->receive_data(receive_q, receive_dq, receive_tau);
-  } else if (receive_data.canData[0] == 0x01) {
-    // 接收错误
-
-  } else {
-    LOGW("[damiao] Receive Frame error");
-
-    for (int i = 0; i < sizeof(receive_data.canData); i++) {
-      printf("0x%02X ", receive_data.canData[i]);
-    }
-    printf("\n");
+  if (motors.find(receive_data.canId) == motors.end()) {
+    LOGW("[damiao] Cant find motor by id");
+    return;
   }
+  auto m = motors[receive_data.canId];
+  Limit_param limit_param_receive = m->get_limit_param();
+  float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX,
+                                  limit_param_receive.Q_MAX, 16);
+  float receive_dq = uint_to_float(dq_uint, -limit_param_receive.DQ_MAX,
+                                    limit_param_receive.DQ_MAX, 12);
+  float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX,
+                                    limit_param_receive.TAU_MAX, 12);
+
+  m->receive_data(receive_q, receive_dq, receive_tau);
 }
 
 // 以下是同步队列的实现
