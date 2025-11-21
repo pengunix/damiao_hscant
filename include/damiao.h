@@ -401,8 +401,8 @@ private:
   // ! 配套的api有MotorContorl构造函数、write、read函数
   // TODO(me): 暂时不用像这样暴露整个数据，后续修改
   std::unordered_map<Motor_id, DmActData> dmact_data;
-  Can_Send_Frame send_data;         // send data frame
-  Can_Receive_Frame receive_data{}; // receive data frame
+  //Can_Send_Frame send_data;         // send data frame
+  //Can_Receive_Frame receive_data{}; // receive data frame
 };
 
 }; // namespace damiao

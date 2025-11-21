@@ -43,7 +43,7 @@ class SerialPort {
 public:
   using SharedPtr = std::shared_ptr<SerialPort>;
 
-  SerialPort(std::string port, speed_t baudrate, int timeout_ms = 10) {
+  SerialPort(std::string port, speed_t baudrate, int timeout_ms = 5) {
     set_timeout(timeout_ms);
     Init(port, baudrate);
   }
@@ -67,7 +67,8 @@ public:
       LOGW("[SerialPort] communication error");
       break;
     case 0: // timeout
-      LOGW("[SerialPort] Serial read timeout");
+      // Allow Timeout
+      // LOGW("[SerialPort] Serial read timeout");
       break;
     default:
       recv_len = ::read(fd_, data, len);

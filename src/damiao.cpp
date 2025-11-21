@@ -88,35 +88,38 @@ Motor_Control::Motor_Control(HSCanT::HSCanT_handler *hscant_handler)
   //   addMotor(motor);
   // }
 
-  update_thread = std::thread(&Motor_Control::update_motor, this);
   stop_update_thread_ = false;
+  update_thread = std::thread(&Motor_Control::update_motor, this);
 }
 
 Motor_Control::~Motor_Control() {
   LOGW("Motor_Control Exited");
   for (const auto &pair : motors) {
     Motor_id id = pair.first;
-    control_mit(*motors[id], 0, 5, 0, 0, 0);
-    usleep(200);
+    control_mit(*motors[id], 0, 0, 0, 0, 0);
   }
 
   stop_update_thread_ = true;
-  send_queue.shutdown();
   if (update_thread.joinable()) {
     update_thread.join();
   }
+  send_queue.shutdown();
 }
 
 void Motor_Control::enable() {
   for (auto &it : motors) {
     for (int i = 0; i < 10; i++) {
       control_cmd(it.second->GetSlaveId(), 0xFC);
-      usleep(200);
+      usleep(500);
     }
+    get_motor_data();
   }
 }
 
 void Motor_Control::refresh_motor_status(const Motor &motor) {
+
+
+  Can_Send_Frame send_data;
   uint32_t id = 0x7FF;
   uint8_t can_low = motor.GetSlaveId() & 0xff;         // id low 8 bit
   uint8_t can_high = (motor.GetSlaveId() >> 8) & 0xff; // id high 8 bit
@@ -128,6 +131,7 @@ void Motor_Control::refresh_motor_status(const Motor &motor) {
 }
 // TODO(me): 数据包长度不对，发送数据包需要修改
 void Motor_Control::refresh_allmotor_status() {
+  Can_Send_Frame send_data;
   uint32_t id = 0x7FF;
   for (auto &it : motors) {
     const Motor &motor = *(it.second);
@@ -165,6 +169,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
     uint16_t data_uint = data_norm * ((1 << bits) - 1);
     return data_uint;
   };
+  Can_Send_Frame send_data;
   Motor_id id = motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
     LOGE("[damiao] Cant find motor with given id");
@@ -198,6 +203,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
 }
 
 void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
+  Can_Send_Frame send_data;
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
     LOGE("[damiao] Cant find motor with given id");
@@ -214,6 +220,7 @@ void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
 }
 
 void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
+  Can_Send_Frame send_data;
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
     LOGE("[damiao] Cant find motor with given id");
@@ -229,11 +236,11 @@ void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
 
 void Motor_Control::receive_param() {
   // ? 达妙在这里注释了主动接收，不明白为什么
-
-  if (receive_data.FrameHeader == 0x11 &&
-      receive_data.frameEnd == 0x55) // receive success
+  Can_Receive_Frame receive_data_t;
+  if (receive_data_t.FrameHeader == 0x11 &&
+      receive_data_t.frameEnd == 0x55) // receive success
   {
-    auto &data = receive_data.canData;
+    auto &data = receive_data_t.canData;
     if (data[2] == 0x33 or data[2] == 0x55) {
       uint32_t slaveID = (uint32_t(data[1]) << 8) | data[0];
       uint8_t RID = data[3];
@@ -277,6 +284,7 @@ void Motor_Control::addMotor(
  * @return: motor param 电机参数 如果没查询到返回的参数为0
  */
 float Motor_Control::read_motor_param(Motor &DM_Motor, uint8_t RID) {
+  Can_Send_Frame send_data;
   uint32_t id = DM_Motor.GetSlaveId();
   uint8_t can_low = id & 0xff;
   uint8_t can_high = (id >> 8) & 0xff;
@@ -370,6 +378,7 @@ bool Motor_Control::change_motor_param(Motor &DM_Motor, uint8_t RID,
  * 电机默认参数不会写到flash里面，需要进行写操作
  */
 void Motor_Control::save_motor_param(Motor &DM_Motor) {
+  Can_Send_Frame send_data;
   disable();
   uint32_t id = DM_Motor.GetSlaveId();
   uint8_t id_low = id & 0xff;
@@ -394,10 +403,10 @@ void Motor_Control::changeMotorLimit(Motor &DM_Motor, float P_MAX, float Q_MAX,
   limit_param[DM_Motor.GetMotorType()] = {P_MAX, Q_MAX, T_MAX};
 }
 
-// 单指令不用同步队列
 void Motor_Control::control_cmd(Motor_id id, uint8_t cmd) {
   std::array<uint8_t, 8> data_buf = {0xff, 0xff, 0xff, 0xff,
                                      0xff, 0xff, 0xff, cmd};
+  Can_Send_Frame send_data;
   send_data.modify(id, data_buf.data());
   // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
   // send_queue.try_push(send_data);
@@ -406,6 +415,7 @@ void Motor_Control::control_cmd(Motor_id id, uint8_t cmd) {
 
 void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
                                       const uint8_t data[4]) {
+  Can_Send_Frame send_data;
   uint32_t id = DM_Motor.GetSlaveId();
   uint8_t can_low = id & 0xff;
   uint8_t can_high = (id >> 8) & 0xff;
@@ -421,13 +431,11 @@ void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
 
 // 所有发送数据集中在这里，不阻塞主线程
 void Motor_Control::update_motor() {
-  while (!stop_update_thread_) {
+  while (!stop_update_thread_ || !send_queue.empty()) {
     Can_Send_Frame frame;
     if (send_queue.pop(frame)) {
       hscant_handler->send_frame(frame.canId, frame.data, 8);
       get_motor_data();
-      // 这里能解决超时问题，can发太快会过度占用总线
-      // TODO(me): 尝试使用计数信号量优化，提高总线利用率
       usleep(200);
     }
   }
@@ -459,7 +467,10 @@ void Motor_Control::read() {
 }
 
 void Motor_Control::get_motor_data() {
-  hscant_handler->recv_frame(receive_data.canId, receive_data.canData, 8);
+  Can_Receive_Frame receive_data_t;
+  if (!hscant_handler->recv_frame(receive_data_t.canId, receive_data_t.canData, 8)) {
+    return;
+  }
   // TODO(me): 状态码判断，receive_data.CMD只有使用达妙的can才能用
   // 这里去掉CMD判断，默认由HSCanT类处理
   // 电机故障码在canData[0]里，高
@@ -471,17 +482,17 @@ void Motor_Control::get_motor_data() {
     return data;
   };
 
-  auto &data = receive_data.canData;
+  auto &data = receive_data_t.canData;
 
   uint16_t q_uint = (uint16_t(data[1]) << 8) | data[2];
   uint16_t dq_uint = (uint16_t(data[3]) << 4) | (data[4] >> 4);
   uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
 
-  if (motors.find(receive_data.canId) == motors.end()) {
-    LOGW("[damiao] Cant find motor by id");
+  if (motors.find(receive_data_t.canId) == motors.end()) {
+    LOGW("[damiao] Cant find motor by id: %X", receive_data_t.canId);
     return;
   }
-  auto m = motors[receive_data.canId];
+  auto m = motors[receive_data_t.canId];
   Limit_param limit_param_receive = m->get_limit_param();
   float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX,
                                   limit_param_receive.Q_MAX, 16);
@@ -490,6 +501,7 @@ void Motor_Control::get_motor_data() {
   float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX,
                                     limit_param_receive.TAU_MAX, 12);
 
+  // std::cout << receive_data_t.canId << " " << receive_q << std::endl;
   m->receive_data(receive_q, receive_dq, receive_tau);
 }
 

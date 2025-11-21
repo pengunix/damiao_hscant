@@ -74,15 +74,16 @@ public:
     serial_ptr_->send((uint8_t *)&send_buf, sizeof(hscan_command_t));
   }
 
-  void recv_frame(uint32_t &id, uint8_t *data_buf, size_t buf_size) {
+  bool recv_frame(uint32_t &id, uint8_t *data_buf, size_t buf_size) {
     hscan_command_t recv_cmd;
     serial_ptr_->recv((uint8_t *)&recv_cmd, sizeof(recv_cmd));
+
     // 检查命令头和结束符，这里默认为标准can帧
     // ! 改写扩展帧时注意这里
     if (recv_cmd.command != 't' || recv_cmd.len != '8' || recv_cmd.CR != '\r') {
-      LOGW("[HSCanT] Receive Frame error");
+      // LOGW("[HSCanT] Receive Frame error");
 
-      return;
+      return false;
     }
 
     std::array<uint8_t, 8> data;
@@ -102,6 +103,7 @@ public:
     id = (hexChar2Nibble(recv_cmd.canId[0]) << 8) |
          (hexChar2Nibble(recv_cmd.canId[1]) << 4) |
          hexChar2Nibble(recv_cmd.canId[2]);
+    return true;
   }
 
 private:
