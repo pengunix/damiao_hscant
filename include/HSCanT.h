@@ -43,8 +43,11 @@ public:
     if (serial_ptr_ == nullptr || !serial_ptr_->is_Open()) {
       LOGE("[HSCanT_handler] serial port is not valid");
     }
+    serial_ptr_->flush();
   }
   ~HSCanT_handler() {
+    // Stop HSCanT
+    serial_ptr_->send((uint8_t *)"O\r", 2);
     if (serial_ptr_->is_Open()) {
       serial_ptr_->close();
     }
@@ -143,6 +146,9 @@ public:
     }
     valid_ = true;
 
+//    for (auto & serial : serial_ptrs_) {
+//      serial->flush();
+//    }
     assert(valid_);
   }
 

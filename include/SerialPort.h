@@ -8,6 +8,9 @@
 #include <string>
 #include <unistd.h>
 
+#include <fstream>
+#include <sstream>
+
 #ifdef USE_ROS
 #include <ros/ros.h>
 #define LOGD(...) ROS_DEBUG(__VA_ARGS__)
@@ -43,9 +46,25 @@ class SerialPort {
 public:
   using SharedPtr = std::shared_ptr<SerialPort>;
 
+  // test
+  #ifdef debug
+  std::fstream f;
+  #endif
+  // test
+
   SerialPort(std::string port, speed_t baudrate, int timeout_ms = 5) {
     set_timeout(timeout_ms);
-    Init(port, baudrate);
+    if (Init(port, baudrate) != 0) {
+      LOGW("[SerialPort] Init Error");
+    }
+
+    // test
+    #ifdef debug
+    std::stringstream ss;
+    ss << "./sendlog" << port.back();
+    f.open(ss.str(),std::ios::out);
+    #endif
+    // test
   }
 
   ~SerialPort() { close(); }
@@ -53,6 +72,16 @@ public:
   ssize_t send(const uint8_t *data, size_t len) {
     // tcflush(fd_, TCIFLUSH);
     ssize_t ret = ::write(fd_, data, len);
+
+    // test
+    #ifdef debug
+    for (int i=0;i<len;i++) {
+      f << data[i];
+    }
+    f << std::endl;
+    #endif
+    // test
+
     // tcdrain(fd_);
     return ret;
   }
@@ -115,8 +144,10 @@ public:
 
   void close() { ::close(fd_); }
 
+  void flush() { tcflush(fd_, TCIFLUSH); }
+
 private:
-  void Init(std::string port, speed_t baudrate) {
+  int Init(std::string port, speed_t baudrate) {
     int ret;
     // Open serial port
     fd_ = open(port.c_str(), O_RDWR | O_NOCTTY);
@@ -125,6 +156,10 @@ private:
       is_open = false;
       exit(-1);
     }
+//    ioctl(fd_, TCFLSH, 0);
+//    ioctl(fd_, TCFLSH, 1);
+//    ioctl(fd_, TCFLSH, 2);
+
     is_open = true;
     // Set attributes
     struct termios option;
@@ -151,8 +186,10 @@ private:
     option.c_cc[VMIN] = 0;
     option.c_lflag |= CBAUDEX;
 
-    ret = tcflush(fd_, TCIFLUSH);
+    ret = tcflush(fd_, TCIOFLUSH);
     ret = tcsetattr(fd_, TCSANOW, &option);
+//    ret = tcflush(fd_, TCIOFLUSH);
+    return ret;
   }
 
   int fd_;

@@ -8,18 +8,25 @@
 namespace damiao {
 
 Limit_param limit_param[Num_Of_Motor] = {
-    {12.5, 30, 10},  // DM4310
-    {12.5, 50, 10},  // DM4310_48V
-    {12.5, 10, 28},  // DM4340
-    {12.5, 10, 28},  // DM4340_48V
-    {12.5, 45, 12},  // DM6006
-    {12.5, 45, 20},  // DM8006
-    {12.5, 45, 54},  // DM8009
-    {12.5, 25, 200}, // DM10010L
-    {12.5, 20, 200}, // DM10010
-    {12.5, 280, 1},  // DMH3510
-    {12.5, 45, 10},  // DMH6215
-    {12.5, 45, 10}   // DMG6220
+    {12.5, 30, 10, 500, 5},         // DM4310
+    {12.5, 50, 10, 500, 5},         // DM4310_48V
+    {12.5, 10, 28, 500, 5},         // DM4340
+    {12.5, 10, 28, 500, 5},         // DM4340_48V
+    {12.5, 45, 12, 500, 5},         // DM6006
+    {12.5, 45, 20, 500, 5},         // DM8006
+    {12.5, 45, 54, 500, 5},         // DM8009
+    {12.5, 25, 200, 500, 5},        // DM10010L
+    {12.5, 20, 200, 500, 5},        // DM10010
+    {12.5, 280, 1, 500, 5},         // DMH3510
+    {12.5, 45, 10, 500, 5},         // DMH6215
+    {12.5, 45, 10, 500, 5},         // DMG6220
+    {4 * M_PI, 33, 14, 500, 5},     // RS00 DQ50? T17?
+    {4 * M_PI, 44, 17, 500, 5},     // RS01
+    {4 * M_PI, 44, 17, 500, 5},     // RS02
+    {4 * M_PI, 20, 60, 5000, 100},  // RS03 DQ50?
+    {4 * M_PI, 15, 120, 5000, 100}, // RS04
+    {4 * M_PI, 50, 5.5, 500, 5},    // RS05 DQ33? T17?
+    {4 * M_PI, 50, 36, 5000, 100},  // RS06 DQ20? T60?
 };
 
 Motor::Motor(DM_Motor_Type Motor_Type, Motor_id Slave_id, Motor_id Master_id)
@@ -108,11 +115,12 @@ Motor_Control::~Motor_Control() {
 
 void Motor_Control::enable() {
   for (auto &it : motors) {
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 5; i++) {
       control_cmd(it.second->GetSlaveId(), 0xFC);
-      usleep(500);
+      usleep(200);
     }
     get_motor_data();
+    usleep(200);
   }
 }
 
@@ -177,9 +185,9 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
     // throw std::runtime_error("Motor_Control id not found");
   }
   auto &m = motors[id];
-  uint16_t kp_uint = float_to_uint(kp, 0, 500, 12);
-  uint16_t kd_uint = float_to_uint(kd, 0, 5, 12);
   Limit_param limit_param_cmd = m->get_limit_param();
+  uint16_t kp_uint = float_to_uint(kp, 0, limit_param_cmd.KP_MAX, 12);
+  uint16_t kd_uint = float_to_uint(kd, 0, limit_param_cmd.KD_MAX, 12);
   uint16_t q_uint =
       float_to_uint(q, -limit_param_cmd.Q_MAX, limit_param_cmd.Q_MAX, 16);
   uint16_t dq_uint =

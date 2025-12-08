@@ -44,6 +44,13 @@ enum DM_Motor_Type {
   DMH3510,
   DMH6215,
   DMG6220,
+  RS00,
+  RS01,
+  RS02,
+  RS03,
+  RS04,
+  RS05,
+  RS06,
   Num_Of_Motor
 };
 
@@ -152,6 +159,8 @@ typedef struct {
   float Q_MAX;
   float DQ_MAX;
   float TAU_MAX;
+  float KP_MAX;
+  float KD_MAX;
 } Limit_param;
 
 //电机PMAX DQMAX TAUMAX参数

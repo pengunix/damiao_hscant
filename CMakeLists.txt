@@ -33,9 +33,11 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/include
 )
 
+# debug
 add_definitions(-DUSE_ROS)
+# add_definitions(-DUSE_ROS -Ddebug)
 
-add_executable(${PROJECT_NAME} src/dm_node.cpp src/damiao.cpp)
+add_executable(${PROJECT_NAME} src/rs_node.cpp src/damiao.cpp)
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_generate_messages_cpp)
 
 target_link_libraries(${PROJECT_NAME}
