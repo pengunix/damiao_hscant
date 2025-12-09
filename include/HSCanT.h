@@ -12,7 +12,7 @@ extern "C" {
 
 // 串口节点前缀，使用四路can都是这个前缀
 constexpr char SERIAL_PREFIX[] =
-    "/dev/serial/by-id/usb-HPMicro_USB_Virtual_COM*";
+    "/dev/ttyACM*";
 
 constexpr char hex2char[] = "0123456789ABCDEF";
 

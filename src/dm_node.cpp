@@ -1,19 +1,29 @@
-#include "HSCanT.h"
-#include "damiao.h"
-#include "dm_motor_ros/DmCommand.h"
-#include "dm_motor_ros/DmState.h"
-#include "ros/ros.h"
+#include <chrono>
+#include <cmath>
 #include <csignal>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
+#include "HSCanT.h"
+#include "damiao.h"
+#include "rclcpp/rclcpp.hpp"
+
+#include "damiao_hscant/msg/dm_command.hpp"
+#include "damiao_hscant/msg/dm_state.hpp"
+
+using namespace std::chrono_literals;
+
+// Constants
 constexpr damiao::DM_Motor_Type MotorType = damiao::DM8009;
 constexpr float ZERO_POS = 1.5707963267948;
 constexpr std::array<int, 3> FL_dir = {1, 1, -1};
 constexpr std::array<int, 3> FR_dir = {1, -1, 1};
 constexpr std::array<int, 3> BL_dir = {-1, 1, -1};
 constexpr std::array<int, 3> BR_dir = {-1, -1, 1};
-constexpr std::array<std::array<int, 3>, 4> Motor_dirs = {FL_dir, FR_dir,
-                                                          BL_dir, BR_dir};
+constexpr std::array<std::array<int, 3>, 4> Motor_dirs = {FL_dir, FR_dir, BL_dir, BR_dir};
 
 struct dm_cmd {
   float q;
@@ -23,238 +33,242 @@ struct dm_cmd {
   float kd;
 };
 
-std::mutex dm_cmd_mutex;
-std::array<dm_cmd, 3> FL_cmds;
-std::array<dm_cmd, 3> FR_cmds;
-std::array<dm_cmd, 3> BL_cmds;
-std::array<dm_cmd, 3> BR_cmds;
-
-dm_motor_ros::DmState motor_state_msg;
-
-extern "C" void sigint_handler(int signal) { ROS_INFO("ROS Exited!"); ros::shutdown(); }
-
-void MotorCmdCallback(const dm_motor_ros::DmCommandConstPtr &msg);
-
-int main(int argc, char **argv) {
-  ros::init(argc, argv, "dm_main");
-  // ros::NodeHandle nodeHandle;
-  auto nodeHandle = std::make_unique<ros::NodeHandle>();
-  ros::Rate loop_rate(100);
-
-  std::unique_ptr<HSCanT::HSCanT> hscant = std::make_unique<HSCanT::HSCanT>();
-
-  if (!hscant->is_valid()) {
-    LOGE("HSCanT initialization failed!");
-    return -1;
-  }
-  std::unique_ptr<HSCanT::HSCanT_handler> FL_handler = hscant->export_handler(0);
-  std::unique_ptr<HSCanT::HSCanT_handler> FR_handler = hscant->export_handler(1);
-  std::unique_ptr<HSCanT::HSCanT_handler> BL_handler = hscant->export_handler(2);
-  std::unique_ptr<HSCanT::HSCanT_handler> BR_handler = hscant->export_handler(3);
-
-  std::shared_ptr<damiao::Motor> FL_M0 =
-      std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11);
-  std::shared_ptr<damiao::Motor> FL_M1 =
-      std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12);
-  std::shared_ptr<damiao::Motor> FL_M2 =
-      std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
-  // damiao::Motor_Control dm_FL(FL_handler.get());
-  std::unique_ptr<damiao::Motor_Control> dm_FL = std::make_unique<damiao::Motor_Control>(FL_handler.get());
-  std::array<std::shared_ptr<damiao::Motor>, 3> FL_M = {FL_M0, FL_M1, FL_M2};
-  dm_FL->addMotor({FL_M0, FL_M1, FL_M2});
-
-  std::shared_ptr<damiao::Motor> FR_M0 =
-      std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11);
-  std::shared_ptr<damiao::Motor> FR_M1 =
-      std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12);
-  std::shared_ptr<damiao::Motor> FR_M2 =
-      std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
-  //damiao::Motor_Control dm_FR(FR_handler.get());
-  std::unique_ptr<damiao::Motor_Control> dm_FR = std::make_unique<damiao::Motor_Control>(FR_handler.get());
-  std::array<std::shared_ptr<damiao::Motor>, 3> FR_M = {FR_M0, FR_M1, FR_M2};
-  dm_FR->addMotor({FR_M0, FR_M1, FR_M2});
-
-  std::shared_ptr<damiao::Motor> BL_M0 =
-      std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11);
-  std::shared_ptr<damiao::Motor> BL_M1 =
-      std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12);
-  std::shared_ptr<damiao::Motor> BL_M2 =
-      std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
-  //damiao::Motor_Control dm_BL(BL_handler.get());
-  std::unique_ptr<damiao::Motor_Control> dm_BL = std::make_unique<damiao::Motor_Control>(BL_handler.get());
-  std::array<std::shared_ptr<damiao::Motor>, 3> BL_M = {BL_M0, BL_M1, BL_M2};
-  dm_BL->addMotor({BL_M0, BL_M1, BL_M2});
-
-  std::shared_ptr<damiao::Motor> BR_M0 =
-      std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11);
-  std::shared_ptr<damiao::Motor> BR_M1 =
-      std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12);
-  std::shared_ptr<damiao::Motor> BR_M2 =
-      std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13);
-  std::array<std::shared_ptr<damiao::Motor>, 3> BR_M = {BR_M0, BR_M1, BR_M2};
-  //damiao::Motor_Control dm_BR(BR_handler.get());
-  std::unique_ptr<damiao::Motor_Control> dm_BR = std::make_unique<damiao::Motor_Control>(BR_handler.get());
-  dm_BR->addMotor({BR_M0, BR_M1, BR_M2});
-
-  // 这里获取到的是原始位置，只要不为未初始化的0都代表电机初始化完成
-  sleep(1);
-  dm_FL->enable();
-  dm_FR->enable();
-  dm_BL->enable();
-  dm_BR->enable();
-
-  ROS_INFO("=================================================");
-  std::vector<float> init_pos = {
-      FL_M0->Get_Position(), FL_M1->Get_Position(), FL_M2->Get_Position(),
-      FR_M0->Get_Position(), FR_M1->Get_Position(), FR_M2->Get_Position(),
-      BL_M0->Get_Position(), BL_M1->Get_Position(), BL_M2->Get_Position(),
-      BR_M0->Get_Position(), BR_M1->Get_Position(), BR_M2->Get_Position()};
-  for (int i = 0; i < init_pos.size(); i++) {
-    ROS_INFO("Motor %d Initial Position: %.4f", i, init_pos[i]);
-    if (fabs(init_pos[0]) == 0.0000) {
-      ROS_ERROR("Motor %d may not be connected properly!", i);
-      dm_FL->disable();
-      dm_FR->disable();
-      dm_BL->disable();
-      dm_BR->disable();
-      return 1;
+class DamiaoMotorNode : public rclcpp::Node {
+public:
+  DamiaoMotorNode() : Node("dm_main") {
+    // 1. Initialize HSCanT
+    hscant_ = std::make_unique<HSCanT::HSCanT>();
+    if (!hscant_->is_valid()) {
+      RCLCPP_ERROR(this->get_logger(), "HSCanT initialization failed!");
+      rclcpp::shutdown();
+      return;
     }
+
+    // 2. Export Handlers
+    auto FL_handler_ptr = hscant_->export_handler(0);
+    auto FR_handler_ptr = hscant_->export_handler(1);
+    auto BL_handler_ptr = hscant_->export_handler(2);
+    auto BR_handler_ptr = hscant_->export_handler(3);
+
+    // 3. Initialize Motors and Controllers
+    // Front Left
+    FL_M_ = {std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11),
+             std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12),
+             std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13)};
+    dm_FL_ = std::make_unique<damiao::Motor_Control>(FL_handler_ptr.get());
+    dm_FL_->addMotor({FL_M_[0], FL_M_[1], FL_M_[2]});
+
+    // Front Right
+    FR_M_ = {std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11),
+             std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12),
+             std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13)};
+    dm_FR_ = std::make_unique<damiao::Motor_Control>(FR_handler_ptr.get());
+    dm_FR_->addMotor({FR_M_[0], FR_M_[1], FR_M_[2]});
+
+    // Back Left
+    BL_M_ = {std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11),
+             std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12),
+             std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13)};
+    dm_BL_ = std::make_unique<damiao::Motor_Control>(BL_handler_ptr.get());
+    dm_BL_->addMotor({BL_M_[0], BL_M_[1], BL_M_[2]});
+
+    // Back Right
+    BR_M_ = {std::make_shared<damiao::Motor>(MotorType, 0x01, 0x11),
+             std::make_shared<damiao::Motor>(MotorType, 0x02, 0x12),
+             std::make_shared<damiao::Motor>(MotorType, 0x03, 0x13)};
+    dm_BR_ = std::make_unique<damiao::Motor_Control>(BR_handler_ptr.get());
+    dm_BR_->addMotor({BR_M_[0], BR_M_[1], BR_M_[2]});
+
+    // Move ownership of handlers to member variables to keep them alive
+    FL_handler_ = std::move(FL_handler_ptr);
+    FR_handler_ = std::move(FR_handler_ptr);
+    BL_handler_ = std::move(BL_handler_ptr);
+    BR_handler_ = std::move(BR_handler_ptr);
+
+    // 4. Enable Sequence
+    std::this_thread::sleep_for(1s);
+    dm_FL_->enable();
+    dm_FR_->enable();
+    dm_BL_->enable();
+    dm_BR_->enable();
+
+    // 5. Check Connections
+    RCLCPP_INFO(this->get_logger(), "=================================================");
+    std::vector<float> init_pos = {
+        FL_M_[0]->Get_Position(), FL_M_[1]->Get_Position(), FL_M_[2]->Get_Position(),
+        FR_M_[0]->Get_Position(), FR_M_[1]->Get_Position(), FR_M_[2]->Get_Position(),
+        BL_M_[0]->Get_Position(), BL_M_[1]->Get_Position(), BL_M_[2]->Get_Position(),
+        BR_M_[0]->Get_Position(), BR_M_[1]->Get_Position(), BR_M_[2]->Get_Position()};
+
+    for (size_t i = 0; i < init_pos.size(); i++) {
+      RCLCPP_INFO(this->get_logger(), "Motor %ld Initial Position: %.4f", i, init_pos[i]);
+      // Safety check: exact 0.0 usually means no communication
+      if (std::fabs(init_pos[0]) == 0.0000) {
+        RCLCPP_ERROR(this->get_logger(), "Motor %ld may not be connected properly!", i);
+        this->disable_all();
+        rclcpp::shutdown();
+        return;
+      }
+    }
+    RCLCPP_INFO(this->get_logger(), "Damiao Motor Node Initialized.");
+    RCLCPP_INFO(this->get_logger(), "=================================================");
+
+    // 6. Initialize Commands
+    init_commands();
+
+    // 7. Initialize ROS Communication
+    motor_state_msg_.joint_names = {
+        "FL_M0", "FL_M1", "FL_M2", "FR_M0", "FR_M1", "FR_M2",
+        "BL_M0", "BL_M1", "BL_M2", "BR_M0", "BR_M1", "BR_M2"};
+
+    // QoS for high frequency control
+    rclcpp::QoS qos_profile(128);
+    qos_profile.reliable();
+
+    sub_ = this->create_subscription<damiao_hscant::msg::DmCommand>(
+        "/dm_cmd", qos_profile,
+        std::bind(&DamiaoMotorNode::command_callback, this, std::placeholders::_1));
+
+    pub_ = this->create_publisher<damiao_hscant::msg::DmState>("/dm_states", qos_profile);
+
+    // 8. Start Control Loop Timer (100Hz = 10ms)
+    timer_ = this->create_wall_timer(
+        10ms, std::bind(&DamiaoMotorNode::control_loop, this));
   }
-  ROS_INFO("Damiao Motor Node Initialized.");
-  ROS_INFO("=================================================");
 
+  // Destructor handles safe shutdown
+  ~DamiaoMotorNode() {
+    RCLCPP_INFO(this->get_logger(), "Shutting down Damiao Node...");
+    disable_all();
+  }
 
-  FL_cmds.fill({0, 0, 0, 0, 0});
-  FL_cmds[2].q = ZERO_POS;
-  FR_cmds.fill({0, 0, 0, 0, 0});
-  FR_cmds[2].q = ZERO_POS;
-  BL_cmds.fill({0, 0, 0, 0, 0});
-  BL_cmds[2].q = ZERO_POS;
-  BR_cmds.fill({0, 0, 0, 0, 0});
-  BR_cmds[2].q = ZERO_POS;
+private:
+  void init_commands() {
+    FL_cmds_.fill({0, 0, 0, 0, 0}); FL_cmds_[2].q = ZERO_POS;
+    FR_cmds_.fill({0, 0, 0, 0, 0}); FR_cmds_[2].q = ZERO_POS;
+    BL_cmds_.fill({0, 0, 0, 0, 0}); BL_cmds_[2].q = ZERO_POS;
+    BR_cmds_.fill({0, 0, 0, 0, 0}); BR_cmds_[2].q = ZERO_POS;
+  }
 
-  motor_state_msg.joint_names = {"FL_M0", "FL_M1", "FL_M2", "FR_M0",
-                                 "FR_M1", "FR_M2", "BL_M0", "BL_M1",
-                                 "BL_M2", "BR_M0", "BR_M1", "BR_M2"};
+  void disable_all() {
+    if(dm_FL_) dm_FL_->disable();
+    if(dm_FR_) dm_FR_->disable();
+    if(dm_BL_) dm_BL_->disable();
+    if(dm_BR_) dm_BR_->disable();
+  }
 
-  boost::function<void(const dm_motor_ros::DmCommandConstPtr &)> callback =
-      [&](const dm_motor_ros::DmCommandConstPtr &msg) -> void {
-    std::lock_guard<std::mutex> lock(dm_cmd_mutex);
-    for (int i = 0; i < msg->kp.size(); i++) {
+  void command_callback(const damiao_hscant::msg::DmCommand::SharedPtr msg) {
+    std::lock_guard<std::mutex> lock(dm_cmd_mutex_);
+    for (size_t i = 0; i < msg->kp.size(); i++) {
       int leg = i / 3;
       int joint = i % 3;
-      float q_cmd = msg->pos[i];
-      float dq_cmd = msg->vel[i];
-      float tau_cmd = msg->tau[i];
-      float kp_cmd = msg->kp[i];
-      float kd_cmd = msg->kd[i];
+      
+      // Ensure we don't access out of bounds if message size is wrong
+      if (leg > 3) continue;
+
+      dm_cmd cmd = {msg->pos[i], msg->vel[i], msg->tau[i], msg->kp[i], msg->kd[i]};
+
       switch (leg) {
-      case 0:
-        FL_cmds[joint] = {q_cmd, dq_cmd, tau_cmd, kp_cmd, kd_cmd};
-        break;
-      case 1:
-        FR_cmds[joint] = {q_cmd, dq_cmd, tau_cmd, kp_cmd, kd_cmd};
-        break;
-      case 2:
-        BL_cmds[joint] = {q_cmd, dq_cmd, tau_cmd, kp_cmd, kd_cmd};
-        break;
-      case 3:
-        BR_cmds[joint] = {q_cmd, dq_cmd, tau_cmd, kp_cmd, kd_cmd};
-        break;
-      default:
-        break;
+      case 0: FL_cmds_[joint] = cmd; break;
+      case 1: FR_cmds_[joint] = cmd; break;
+      case 2: BL_cmds_[joint] = cmd; break;
+      case 3: BR_cmds_[joint] = cmd; break;
+      default: break;
       }
     }
-  };
-  ros::Subscriber MotorCmdSub = nodeHandle->subscribe("/dm_cmd", 128, callback);
+  }
 
-  ros::Publisher MotorStatePub =
-      nodeHandle->advertise<dm_motor_ros::DmState>("/dm_states", 128);
-
-  ros::AsyncSpinner async_spinner(1);
-  async_spinner.start();
-
-  while (ros::ok()) {
-    if (std::signal(SIGINT, sigint_handler) == SIG_ERR) {
-      return 1;
-    }
-
+  void control_loop() {
+    // --- 1. SEND COMMANDS ---
     {
-      std::lock_guard<std::mutex> lock(dm_cmd_mutex);
-      for (int i = 0; i < FL_M.size(); i++) {
-        float offset = 0;
-        if (i == 2) {
-          offset = ZERO_POS;
-        }
-        dm_FL->control_mit(*FL_M[i], FL_cmds[i].kp, FL_cmds[i].kd,
-                          FL_cmds[i].q * FL_dir[i] - offset,
-                          FL_cmds[i].dq * FL_dir[i],
-                          FL_cmds[i].tau * FL_dir[i]);
-        dm_FR->control_mit(*FR_M[i], FR_cmds[i].kp, FR_cmds[i].kd,
-                          FR_cmds[i].q * FR_dir[i] + offset,
-                          FR_cmds[i].dq * FR_dir[i],
-                          FR_cmds[i].tau * FR_dir[i]);
-        dm_BL->control_mit(*BL_M[i], BL_cmds[i].kp, BL_cmds[i].kd,
-                          BL_cmds[i].q * BL_dir[i] - offset,
-                          BL_cmds[i].dq * BL_dir[i],
-                          BL_cmds[i].tau * BL_dir[i]);
-        dm_BR->control_mit(*BR_M[i], BR_cmds[i].kp, BR_cmds[i].kd,
-                          BR_cmds[i].q * BR_dir[i] + offset,
-                          BR_cmds[i].dq * BR_dir[i],
-                          BR_cmds[i].tau * BR_dir[i]);
+      std::lock_guard<std::mutex> lock(dm_cmd_mutex_);
+      for (size_t i = 0; i < 3; i++) {
+        float offset = (i == 2) ? ZERO_POS : 0.0f;
+
+        dm_FL_->control_mit(*FL_M_[i], FL_cmds_[i].kp, FL_cmds_[i].kd,
+                            FL_cmds_[i].q * FL_dir[i] - offset,
+                            FL_cmds_[i].dq * FL_dir[i],
+                            FL_cmds_[i].tau * FL_dir[i]);
+
+        dm_FR_->control_mit(*FR_M_[i], FR_cmds_[i].kp, FR_cmds_[i].kd,
+                            FR_cmds_[i].q * FR_dir[i] + offset,
+                            FR_cmds_[i].dq * FR_dir[i],
+                            FR_cmds_[i].tau * FR_dir[i]);
+
+        dm_BL_->control_mit(*BL_M_[i], BL_cmds_[i].kp, BL_cmds_[i].kd,
+                            BL_cmds_[i].q * BL_dir[i] - offset,
+                            BL_cmds_[i].dq * BL_dir[i],
+                            BL_cmds_[i].tau * BL_dir[i]);
+
+        dm_BR_->control_mit(*BR_M_[i], BR_cmds_[i].kp, BR_cmds_[i].kd,
+                            BR_cmds_[i].q * BR_dir[i] + offset,
+                            BR_cmds_[i].dq * BR_dir[i],
+                            BR_cmds_[i].tau * BR_dir[i]);
       }
     }
 
-    // 右侧大腿关节取相反数
-    // 左侧小腿关节减去零位后取相反数
-    // 速度、力矩同理，只取反即可
-    // TODO(me): 封装状态数组以对应电机和索引，并完成姿态转换
-    motor_state_msg.pos = {FL_M0->Get_Position(),
-                           FL_M1->Get_Position(),
-                           FL_M2->Get_Position() + ZERO_POS,
-                           FR_M0->Get_Position(),
-                           FR_M1->Get_Position(),
-                           FR_M2->Get_Position() - ZERO_POS,
-                           BL_M0->Get_Position(),
-                           BL_M1->Get_Position(),
-                           BL_M2->Get_Position() + ZERO_POS,
-                           BR_M0->Get_Position(),
-                           BR_M1->Get_Position(),
-                           BR_M2->Get_Position() - ZERO_POS};
+    // --- 2. READ STATE ---
+    motor_state_msg_.pos = {
+        FL_M_[0]->Get_Position(), FL_M_[1]->Get_Position(), FL_M_[2]->Get_Position() + ZERO_POS,
+        FR_M_[0]->Get_Position(), FR_M_[1]->Get_Position(), FR_M_[2]->Get_Position() - ZERO_POS,
+        BL_M_[0]->Get_Position(), BL_M_[1]->Get_Position(), BL_M_[2]->Get_Position() + ZERO_POS,
+        BR_M_[0]->Get_Position(), BR_M_[1]->Get_Position(), BR_M_[2]->Get_Position() - ZERO_POS};
 
-    motor_state_msg.vel = {
-        FL_M0->Get_Velocity(), FL_M1->Get_Velocity(), FL_M2->Get_Velocity(),
-        FR_M0->Get_Velocity(), FR_M1->Get_Velocity(), FR_M2->Get_Velocity(),
-        BL_M0->Get_Velocity(), BL_M1->Get_Velocity(), BL_M2->Get_Velocity(),
-        BR_M0->Get_Velocity(), BR_M1->Get_Velocity(), BR_M2->Get_Velocity()};
+    motor_state_msg_.vel = {
+        FL_M_[0]->Get_Velocity(), FL_M_[1]->Get_Velocity(), FL_M_[2]->Get_Velocity(),
+        FR_M_[0]->Get_Velocity(), FR_M_[1]->Get_Velocity(), FR_M_[2]->Get_Velocity(),
+        BL_M_[0]->Get_Velocity(), BL_M_[1]->Get_Velocity(), BL_M_[2]->Get_Velocity(),
+        BR_M_[0]->Get_Velocity(), BR_M_[1]->Get_Velocity(), BR_M_[2]->Get_Velocity()};
 
-    motor_state_msg.tau = {
-        FL_M0->Get_tau(), FL_M1->Get_tau(), FL_M2->Get_tau(), FR_M0->Get_tau(),
-        FR_M1->Get_tau(), FR_M2->Get_tau(), BL_M0->Get_tau(), BL_M1->Get_tau(),
-        BL_M2->Get_tau(), BR_M0->Get_tau(), BR_M1->Get_tau(), BR_M2->Get_tau()};
-    for (int i = 0; i < Motor_dirs.size(); i++) {
-      for (int j = 0; j < FL_dir.size(); j++) {
+    motor_state_msg_.tau = {
+        FL_M_[0]->Get_tau(), FL_M_[1]->Get_tau(), FL_M_[2]->Get_tau(),
+        FR_M_[0]->Get_tau(), FR_M_[1]->Get_tau(), FR_M_[2]->Get_tau(),
+        BL_M_[0]->Get_tau(), BL_M_[1]->Get_tau(), BL_M_[2]->Get_tau(),
+        BR_M_[0]->Get_tau(), BR_M_[1]->Get_tau(), BR_M_[2]->Get_tau()};
+
+    // --- 3. TRANSFORM STATE ---
+    for (size_t i = 0; i < Motor_dirs.size(); i++) {
+      for (size_t j = 0; j < FL_dir.size(); j++) {
         if (Motor_dirs[i][j] == -1) {
           int index = i * 3 + j;
-          motor_state_msg.pos[index] = -motor_state_msg.pos[index];
-          motor_state_msg.vel[index] = -motor_state_msg.vel[index];
-          motor_state_msg.tau[index] = -motor_state_msg.tau[index];
+          motor_state_msg_.pos[index] = -motor_state_msg_.pos[index];
+          motor_state_msg_.vel[index] = -motor_state_msg_.vel[index];
+          motor_state_msg_.tau[index] = -motor_state_msg_.tau[index];
         }
       }
     }
-    MotorStatePub.publish(motor_state_msg);
-    loop_rate.sleep();
-  }
-  // Motors May not need to be reset
-  dm_FL.reset();
-  dm_FR.reset();
-  dm_BL.reset();
-  dm_BR.reset();
-  FL_handler.reset();
-  FR_handler.reset();
-  BL_handler.reset();
-  BR_handler.reset();
-  hscant.reset();
 
+    // --- 4. PUBLISH ---
+    pub_->publish(motor_state_msg_);
+  }
+
+  // Member Variables
+  std::unique_ptr<HSCanT::HSCanT> hscant_;
+  std::unique_ptr<HSCanT::HSCanT_handler> FL_handler_, FR_handler_, BL_handler_, BR_handler_;
+  
+  std::unique_ptr<damiao::Motor_Control> dm_FL_, dm_FR_, dm_BL_, dm_BR_;
+  std::array<std::shared_ptr<damiao::Motor>, 3> FL_M_, FR_M_, BL_M_, BR_M_;
+
+  std::mutex dm_cmd_mutex_;
+  std::array<dm_cmd, 3> FL_cmds_, FR_cmds_, BL_cmds_, BR_cmds_;
+
+  damiao_hscant::msg::DmState motor_state_msg_;
+  rclcpp::Subscription<damiao_hscant::msg::DmCommand>::SharedPtr sub_;
+  rclcpp::Publisher<damiao_hscant::msg::DmState>::SharedPtr pub_;
+  rclcpp::TimerBase::SharedPtr timer_;
+};
+
+int main(int argc, char **argv) {
+  rclcpp::init(argc, argv);
+
+  auto node = std::make_shared<DamiaoMotorNode>();
+
+  // Use MultiThreadedExecutor to allow the timer (control loop) and 
+  // subscriber (commands) to run in parallel threads safely.
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin();
+
+  rclcpp::shutdown();
   return 0;
 }

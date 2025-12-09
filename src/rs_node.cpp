@@ -185,6 +185,7 @@ int main(int argc, char **argv) {
   ros::AsyncSpinner async_spinner(1);
   async_spinner.start();
 
+  LOGI("INIT Done=====================");
   while (ros::ok()) {
     if (std::signal(SIGINT, sigint_handler) == SIG_ERR) {
       return 1;
