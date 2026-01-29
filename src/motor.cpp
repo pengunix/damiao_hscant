@@ -1,9 +1,4 @@
-#include "damiao.h"
-#include "SerialPort.h"
-#include <bits/stdint-uintn.h>
-#include <boost/integer_fwd.hpp>
-#include <cstdio>
-#include <unistd.h>
+#include "motor.h"
 
 namespace damiao {
 
@@ -29,9 +24,9 @@ Limit_param limit_param[Num_Of_Motor] = {
     {4 * M_PI, 50, 36, 5000, 100},  // RS06 DQ20? T60?
 };
 
-Motor::Motor(DM_Motor_Type Motor_Type, Motor_id Slave_id, Motor_id Master_id)
-    : Master_id(Master_id), Slave_id(Slave_id), Motor_Type(Motor_Type) {
-  this->limit_param = damiao::limit_param[Motor_Type];
+Motor::Motor(MotorType motor_type, Motor_id Slave_id, Motor_id Master_id)
+    : Master_id(Master_id), Slave_id(Slave_id), motor_type(motor_type) {
+  this->limit_param = damiao::limit_param[motor_type];
 }
 
 void Motor::receive_data(float q, float dq, float tau) {
@@ -40,55 +35,14 @@ void Motor::receive_data(float q, float dq, float tau) {
   this->state_tau = tau;
 }
 
-void Motor::set_param(int key, float value) {
-  ValueType v{};
-  v.value.floatValue = value;
-  v.isFloat = true;
-  param_map[key] = v;
-}
 
-void Motor::set_param(int key, uint32_t value) {
-  ValueType v{};
-  v.value.uint32Value = value;
-  v.isFloat = false;
-  param_map[key] = v;
-}
-
-float Motor::get_param_as_float(int key) const {
-  auto it = param_map.find(key);
-  if (it != param_map.end()) {
-    if (it->second.isFloat) {
-      return it->second.value.floatValue;
-    } else {
-      return 0;
-    }
-  }
-  return 0;
-}
-
-uint32_t Motor::get_param_as_uint32(int key) const {
-  auto it = param_map.find(key);
-  if (it != param_map.end()) {
-    if (!it->second.isFloat) {
-      return it->second.value.uint32Value;
-    } else {
-      return 0;
-    }
-  }
-  return 0;
-}
-
-bool Motor::is_have_param(int key) const {
-  return param_map.find(key) != param_map.end();
-}
-
-Motor_Control::Motor_Control(HSCanT::HSCanT_handler *hscant_handler)
+Motor_Control::Motor_Control(void *hscant_handler)
     : hscant_handler(hscant_handler) {
 
-  // const std::unordered_map<Motor_id, DmActData>& dmact_data)
-  //   : dmact_data(dmact_data) {
+  // const std::unordered_map<Motor_id, DmActData>& act_data)
+  //   : act_data(act_data) {
 
-  // for (const auto & item : dmact_data) {
+  // for (const auto & item : act_data) {
   //   Motor *motor =
   //       new Motor(item.second.motorType, item.second.can_id,
   //                 item.second.mst_id); // 假设Motor的构造函数不需要参数
@@ -242,39 +196,6 @@ void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
   send_queue.try_push(send_data);
 }
 
-void Motor_Control::receive_param() {
-  // ? 达妙在这里注释了主动接收，不明白为什么
-  Can_Receive_Frame receive_data_t;
-  if (receive_data_t.FrameHeader == 0x11 &&
-      receive_data_t.frameEnd == 0x55) // receive success
-  {
-    auto &data = receive_data_t.canData;
-    if (data[2] == 0x33 or data[2] == 0x55) {
-      uint32_t slaveID = (uint32_t(data[1]) << 8) | data[0];
-      uint8_t RID = data[3];
-      if (motors.find(slaveID) == motors.end()) {
-        // can not found motor id
-        return;
-      }
-      if (is_in_ranges(RID)) {
-        uint32_t data_uint32 = (uint32_t(data[7]) << 24) |
-                               (uint32_t(data[6]) << 16) |
-                               (uint32_t(data[5]) << 8) | data[4];
-        motors[slaveID]->set_param(RID, data_uint32);
-      } else {
-        float data_float = uint8_to_float(data + 4);
-        motors[slaveID]->set_param(RID, data_float);
-      }
-    }
-    return;
-  }
-}
-
-/**
- * @brief add motor to class 添加电机
- * @param DM_Motor : motor object 电机对象的地址
- */
-
 void Motor_Control::addMotor(
     std::initializer_list<std::shared_ptr<Motor>> Motor_list) {
   for (const auto &motor : Motor_list) {
@@ -284,128 +205,6 @@ void Motor_Control::addMotor(
   disable();
 }
 
-/*
- * @description: read motor register param
- * 读取电机内部寄存器参数，具体寄存器列表请参考达妙的手册
- * @param DM_Motor: motor object 电机对象
- * @param RID: register id 寄存器ID  example: damiao::UV_Value
- * @return: motor param 电机参数 如果没查询到返回的参数为0
- */
-float Motor_Control::read_motor_param(Motor &DM_Motor, uint8_t RID) {
-  Can_Send_Frame send_data;
-  uint32_t id = DM_Motor.GetSlaveId();
-  uint8_t can_low = id & 0xff;
-  uint8_t can_high = (id >> 8) & 0xff;
-  std::array<uint8_t, 8> data_buf{can_low, can_high, 0x33, RID,
-                                  0x00,    0x00,     0x00, 0x00};
-  send_data.modify(0x7FF, data_buf.data());
-  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
-  send_queue.try_push(send_data);
-  for (uint8_t i = 0; i < max_retries; i++) {
-    usleep(retry_interval);
-    // receive_param();
-    if (motors[DM_Motor.GetSlaveId()]->is_have_param(RID)) {
-      if (is_in_ranges(RID)) {
-        return float(motors[DM_Motor.GetSlaveId()]->get_param_as_uint32(RID));
-      } else {
-        return motors[DM_Motor.GetSlaveId()]->get_param_as_float(RID);
-      }
-    }
-  }
-
-  return 0;
-}
-
-/*
- * @description: switch control mode 切换电机控制模式
- * @param DM_Motor: motor object 电机对象
- * @param mode: control mode 控制模式 like:damiao::MIT_MODE,
- * damiao::POS_VEL_MODE, damiao::VEL_MODE, damiao::POS_FORCE_MODE
- */
-bool Motor_Control::switchControlMode(Motor &DM_Motor, Control_Mode mode) {
-  uint8_t write_data[4] = {(uint8_t)mode, 0x00, 0x00, 0x00};
-  uint8_t RID = 10;
-  write_motor_param(DM_Motor, RID, write_data);
-  if (motors.find(DM_Motor.GetSlaveId()) == motors.end()) {
-    return false;
-  }
-  for (uint8_t i = 0; i < max_retries; i++) {
-    usleep(retry_interval);
-    // receive_param();
-    if (motors[DM_Motor.GetSlaveId()]->is_have_param(RID)) {
-      return motors[DM_Motor.GetSlaveId()]->get_param_as_uint32(RID) == mode;
-    }
-  }
-  return false;
-}
-
-/*
- * @description: change motor param 修改电机内部寄存器参数
- * 具体寄存器列表请参考达妙手册
- * @param DM_Motor: motor object 电机对象
- * @param RID: register id 寄存器ID
- * @param data: param data
- * 参数数据,大部分数据是float类型，其中如果是uint32类型的数据也可以直接输入整型的就行，函数内部有处理
- * @return: bool true or false  是否修改成功
- */
-bool Motor_Control::change_motor_param(Motor &DM_Motor, uint8_t RID,
-                                       float data) {
-  if (is_in_ranges(RID)) {
-    uint32_t data_uint32 = float_to_uint32(data);
-    uint8_t *data_uint8;
-    data_uint8 = (uint8_t *)&data_uint32;
-    write_motor_param(DM_Motor, RID, data_uint8);
-  } else {
-    // is float
-    uint8_t *data_uint8;
-    data_uint8 = (uint8_t *)&data;
-    write_motor_param(DM_Motor, RID, data_uint8);
-  }
-  if (motors.find(DM_Motor.GetSlaveId()) == motors.end()) {
-    return false;
-  }
-  for (uint8_t i = 0; i < max_retries; i++) {
-    usleep(retry_interval);
-    receive_param();
-    if (motors[DM_Motor.GetSlaveId()]->is_have_param(RID)) {
-      if (is_in_ranges(RID)) {
-        return motors[DM_Motor.GetSlaveId()]->get_param_as_uint32(RID) ==
-               float_to_uint32(data);
-      } else {
-        return fabsf(motors[DM_Motor.GetSlaveId()]->get_param_as_float(RID) -
-                     data) < 0.1f;
-      }
-    }
-  }
-  return false;
-}
-
-/*
- * @description: save all param to motor flash 保存电机的所有参数到flash里面
- * @param DM_Motor: motor object 电机对象
- * 电机默认参数不会写到flash里面，需要进行写操作
- */
-void Motor_Control::save_motor_param(Motor &DM_Motor) {
-  Can_Send_Frame send_data;
-  disable();
-  uint32_t id = DM_Motor.GetSlaveId();
-  uint8_t id_low = id & 0xff;
-  uint8_t id_high = (id >> 8) & 0xff;
-  std::array<uint8_t, 8> data_buf{id_low, id_high, 0xAA, 0x01,
-                                  0x00,   0x00,    0x00, 0x00};
-  send_data.modify(0x7FF, data_buf.data());
-  // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
-  send_queue.try_push(send_data);
-}
-
-/*
- * @description: change motor limit param
- * 修改电机限制参数，这个修改的不是电机内部的寄存器参数，而是电机的限制参数
- * @param DM_Motor: motor object 电机对象
- * @param P_MAX: position max 位置最大值
- * @param Q_MAX: velocity max 速度最大值
- * @param T_MAX: torque max 扭矩最大值
- */
 void Motor_Control::changeMotorLimit(Motor &DM_Motor, float P_MAX, float Q_MAX,
                                      float T_MAX) {
   limit_param[DM_Motor.GetMotorType()] = {P_MAX, Q_MAX, T_MAX};
@@ -421,22 +220,6 @@ void Motor_Control::control_cmd(Motor_id id, uint8_t cmd) {
   hscant_handler->send_frame(send_data.canId, send_data.data, 8);
 }
 
-void Motor_Control::write_motor_param(Motor &DM_Motor, uint8_t RID,
-                                      const uint8_t data[4]) {
-  Can_Send_Frame send_data;
-  uint32_t id = DM_Motor.GetSlaveId();
-  uint8_t can_low = id & 0xff;
-  uint8_t can_high = (id >> 8) & 0xff;
-  std::array<uint8_t, 8> data_buf{can_low, can_high, 0x55, RID,
-                                  0x00,    0x00,     0x00, 0x00};
-  data_buf[4] = data[0];
-  data_buf[5] = data[1];
-  data_buf[6] = data[2];
-  data_buf[7] = data[3];
-  send_data.modify(0x7FF, data_buf.data());
-  send_queue.try_push(send_data);
-}
-
 // 所有发送数据集中在这里，不阻塞主线程
 void Motor_Control::update_motor() {
   while (!stop_update_thread_ || !send_queue.empty()) {
@@ -450,7 +233,7 @@ void Motor_Control::update_motor() {
 }
 
 void Motor_Control::write() {
-  for (const auto &m : dmact_data) {
+  for (const auto &m : act_data) {
     int motor_id = m.first; // can_id
     if (motors.find(motor_id) == motors.end()) {
     }
@@ -462,8 +245,8 @@ void Motor_Control::write() {
 }
 
 void Motor_Control::read() {
-  for (auto &m : dmact_data) {
-    int motor_id = m.first; //这里指的是can_id
+  for (auto &m : act_data) {
+    int motor_id = m.first; // can_id
     if (motors.find(motor_id) == motors.end()) {
     }
     auto &it = motors[motor_id];
@@ -513,83 +296,4 @@ void Motor_Control::get_motor_data() {
   m->receive_data(receive_q, receive_dq, receive_tau);
 }
 
-// 以下是同步队列的实现
-template <typename T> Queue<T>::Queue() : shutdown_(false) {}
-
-// 非阻塞推送
-template <typename T> bool Queue<T>::try_push(T value) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (shutdown_) {
-    return false;
-  }
-
-  queue_.push(std::move(value));
-  cond_.notify_one();
-  return true;
-}
-
-// 非阻塞获取
-template <typename T> bool Queue<T>::try_pop(T &value) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (queue_.empty() || shutdown_) {
-    return false;
-  }
-
-  value = std::move(queue_.front());
-  queue_.pop();
-  return true;
-}
-
-// 阻塞获取
-template <typename T> bool Queue<T>::pop(T &value) {
-  std::unique_lock<std::mutex> lock(mutex_);
-
-  cond_.wait(lock, [this]() { return !queue_.empty() || shutdown_; });
-
-  if (shutdown_ && queue_.empty()) {
-    return false;
-  }
-
-  value = std::move(queue_.front());
-  queue_.pop();
-  return true;
-}
-
-// 队列大小
-template <typename T> size_t Queue<T>::size() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return queue_.size();
-}
-
-// 队列是否为空
-template <typename T> bool Queue<T>::empty() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return queue_.empty();
-}
-
-// 清空队列
-template <typename T> void Queue<T>::clear() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  while (!queue_.empty()) {
-    queue_.pop();
-  }
-}
-
-// 关闭队列
-template <typename T> void Queue<T>::shutdown() {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    shutdown_ = true;
-  }
-  cond_.notify_all();
-}
-
-// 检查是否已关闭
-template <typename T> bool Queue<T>::is_shutdown() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return shutdown_;
-}
-
-} // namespace damiao
+} // namespace motor
