@@ -1,0 +1,21 @@
+## 注意
+编译sockcanpp需要cmake > 3.10, 而ros1支持的最高cmake版本为3.5，无法直接编译，此项目为后续更新保留lib/sockcanpp。
+## 下载新版cmake编译sockcanpp
+先修改
+```
+src/damiao_hscant/lib/libsockcanpp/CMakeLists.txt
+第五行改为
+option(BUILD_SHARED_LIBS "Build shared libraries (.so) instead of static ones (.a)" OFF)
+```
+
+```shell
+wget https://cmake.org/files/LatestRelease/cmake-4.2.1-linux-x86_64.tar.gz
+tar zxvf cmake-4.2.1-linux-x86_64.tar.gz
+cd lib/libsockcanpp
+mkdir build
+cd build
+/path/to/cmake ..
+make -j
+cp -r ../include ../../lib/libsockcanpp-prebuild
+cp libsockcanpp.a ../../lib/libsockcanpp-prebuild
+```

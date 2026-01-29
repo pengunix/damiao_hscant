@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>dm_motor_ros</name>
+  <name>motor_ros</name>
   <version>0.0.0</version>
-  <description>The dm_node package</description>
+  <description>The motor_node package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->

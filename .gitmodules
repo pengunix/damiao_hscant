@@ -1,0 +1,6 @@
+[submodule "lib/libsockcanpp"]
+	path = lib/libsockcanpp
+	url = https://github.com/SimonCahill/libsockcanpp
+[submodule "lib/yaml"]
+	path = lib/yaml
+	url = https://github.com/jbeder/yaml-cpp
