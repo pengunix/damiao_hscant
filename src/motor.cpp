@@ -52,6 +52,11 @@ Motor_Control::Motor_Control(sockcanpp::CanDriver *hscant_handler)
   
   stop_update_thread_ = false;
   update_thread = std::thread(&Motor_Control::update_motor, this);
+  recv_thread = std::thread([this]() {
+    while (!stop_update_thread_) {
+      get_motor_data();
+    }
+  });
 }
 
 Motor_Control::~Motor_Control() {
@@ -177,8 +182,6 @@ void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
   memcpy(data_buf.data() + 4, &vel, sizeof(float));
   id += POS_MODE;
   send_data.modify(id, data_buf.data());
-  // serial_->send(reinterpret_cast<uint8_t *>(&send_data),
-  // sizeof(can_send_frame));
   send_queue.try_push(send_data);
 }
 
@@ -241,22 +244,13 @@ void Motor_Control::update_motor() {
   while (!stop_update_thread_ || !send_queue.empty()) {
     Can_Send_Frame frame;
     if (send_queue.pop(frame)) {
-      // hscant_handler->send_frame(frame.canId, frame.data, 8);
       // define in linux/can.h
-      
       struct can_frame can_frame {};
       can_frame.can_id = frame.canId;
       can_frame.can_dlc = 8;
       std::copy(frame.data, frame.data + 8, can_frame.data);
       auto msg = sockcanpp::CanMessage(can_frame);
-      // std::cout << "Sending CAN Message: " << msg << std::endl;
-      std::cout << send_queue.size() << std::endl;
-      auto start = std::chrono::steady_clock::now();
       hscant_handler->sendMessage(msg);
-      get_motor_data();
-      auto end = std::chrono::steady_clock::now();
-      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-      std::cout << "Send duration: " << duration.count() << std::endl;
     }
   }
 }
@@ -316,6 +310,38 @@ void Motor_Control::get_motor_data() {
   const auto txErrorCounter = msg.getTxErrorCounter();
   const auto rxErrorCounter = msg.getRxErrorCounter();
   const auto arbitrationLostInBit = msg.arbitrationLostInBit();
+  // print detailed error info
+  if (hasBusError) {
+    LOGW("  Bus Error");
+  }
+  if (hasBusOffError) {
+    LOGW("  Bus Off Error");
+  } 
+  if (hasControllerProblem) {
+    LOGW("  Controller Problem");
+  }
+  if (hasControllerRestarted) {
+    LOGW("  Controller Restarted");
+  }
+  if (hasErrorCounter) {
+    LOGW("  Error Counter - TX: %u, RX: %u", txErrorCounter, rxErrorCounter);
+  }
+  if (hasLostArbitration) {
+    LOGW("  Lost Arbitration at Bit: %u", arbitrationLostInBit);
+  }
+  if (hasProtocolViolation) { 
+    LOGW("  Protocol Violation: %u", protocolError.errorCode);
+  }
+  if (hasTransceiverStatus) {
+    LOGW("  Transceiver Status: %u", transceiverError.errorCode);
+  }
+  if (missingAckOnTransmit) {
+    LOGW("  Missing Acknowledgment on Transmit");
+  }
+  if (isTxTimeout) {
+    LOGW("  Transmission Timeout");
+  }
+
 
   static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
                                   uint8_t bits) -> float {

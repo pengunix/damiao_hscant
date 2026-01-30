@@ -199,6 +199,11 @@ class Queue {
       return false;
     }
 
+    if (queue_.size() > 100) {
+      LOGW("Queue size exceeded 100, dropping data");
+      return false;
+    }
+
     queue_.push(std::move(value));
     cond_.notify_one();
     return true;
@@ -304,6 +309,7 @@ class Motor_Control {
     return result;
   }
   std::thread update_thread;
+  std::thread recv_thread;
   std::atomic<bool> stop_update_thread_;
 
   std::unordered_map<Motor_id, std::shared_ptr<Motor>> motors;

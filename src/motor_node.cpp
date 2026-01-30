@@ -411,11 +411,11 @@ int main(int argc, char** argv) {
       };
 
   ros::Subscriber cmd_sub = nh->subscribe<motor_ros::Command>(
-      "/dm_cmd", 128, callback);
+      "/dm_cmd", 5, callback);
   
-  ros::Publisher state_pub = nh->advertise<motor_ros::State>("/dm_states", 128);
+  ros::Publisher state_pub = nh->advertise<motor_ros::State>("/dm_states", 5);
   
-  ros::AsyncSpinner async_spinner(1);
+  ros::AsyncSpinner async_spinner(4);
   async_spinner.start();
   
   LOGI("Motor node started, running at 100Hz");
