@@ -66,6 +66,7 @@ install(FILES
    ${CMAKE_CURRENT_SOURCE_DIR}/conf/motors.yaml
    DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+install(PROGRAMS scripts/setup_can.sh DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/scripts)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the

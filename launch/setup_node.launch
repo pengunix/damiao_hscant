@@ -1,0 +1,3 @@
+<launch>
+  <node name="setup_can" pkg="motor_ros" type="setup_can.sh" output="screen"/>
+</launch>

@@ -1,4 +1,5 @@
 <launch>
+  <!-- <node name="setup_can" pkg="motor_ros" type="setup_can.sh" output="screen"/> -->
   <arg name="config_file" default="$(find motor_ros)/conf/motors.yaml" />
   <node name="motor_ros" pkg="motor_ros" type="motor_ros" output="screen" args="--config $(arg config_file)" />
 </launch>

@@ -324,16 +324,18 @@ void Motor_Control::get_motor_data() {
     LOGW("  Controller Restarted");
   }
   if (hasErrorCounter) {
-    LOGW("  Error Counter - TX: %u, RX: %u", txErrorCounter, rxErrorCounter);
+    LOGW("  Error Counter - TX: %lu, RX: %lu", txErrorCounter, rxErrorCounter);
   }
   if (hasLostArbitration) {
     LOGW("  Lost Arbitration at Bit: %u", arbitrationLostInBit);
   }
   if (hasProtocolViolation) { 
-    LOGW("  Protocol Violation: %u", protocolError.errorCode);
+    LOGW("  Protocol Violation");
+    // check protocolError for more details
   }
   if (hasTransceiverStatus) {
-    LOGW("  Transceiver Status: %u", transceiverError.errorCode);
+    LOGW("  Transceiver Status Error");
+    // check transceiverError for more details
   }
   if (missingAckOnTransmit) {
     LOGW("  Missing Acknowledgment on Transmit");
