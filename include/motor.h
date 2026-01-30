@@ -1,5 +1,7 @@
-#ifndef DAMIAO_H
-#define DAMIAO_H
+#ifndef MOTOR_H
+#define MOTOR_H 
+
+#include <CanDriver.hpp>
 
 #include <array>
 #include <atomic>
@@ -17,6 +19,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <linux/can.h>
 
 #define POS_MODE 0x100
 #define SPEED_MODE 0x200
@@ -45,7 +48,7 @@
   printf("\n")
 #endif
 
-namespace damiao {
+namespace motor {
 
 #pragma pack(1)
 #define Motor_id uint32_t
@@ -254,7 +257,7 @@ class Queue {
 
 class Motor_Control {
  public:
-  Motor_Control(void *hscant_handler);
+  Motor_Control(sockcanpp::CanDriver *hscant_handler);
   ~Motor_Control();
   void get_motor_data();
   void enable();
@@ -270,6 +273,7 @@ class Motor_Control {
   void control_vel(Motor &DM_Motor, float vel);
   void receive();
   void addMotor(std::initializer_list<std::shared_ptr<Motor>> Motor_list);
+  void addMotor(std::vector<std::shared_ptr<Motor>> Motor_list);
   static void changeMotorLimit(Motor &DM_Motor, float P_MAX, float Q_MAX,
                                float T_MAX);
 
@@ -303,7 +307,7 @@ class Motor_Control {
   std::atomic<bool> stop_update_thread_;
 
   std::unordered_map<Motor_id, std::shared_ptr<Motor>> motors;
-  void *hscant_handler;
+  sockcanpp::CanDriver *hscant_handler;
   Queue<Can_Send_Frame> send_queue;
 
   // ! 似乎是一个由用户维护的数据，用于集中管理单个串口的多个电机
@@ -312,6 +316,6 @@ class Motor_Control {
   std::unordered_map<Motor_id, ActData> act_data;
 };
 
-};  // namespace damiao
+};  // namespace motor
 
 #endif

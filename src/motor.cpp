@@ -1,6 +1,7 @@
 #include "motor.h"
 
-namespace damiao {
+using namespace std::chrono_literals;
+namespace motor {
 
 Limit_param limit_param[Num_Of_Motor] = {
     {12.5, 30, 10, 500, 5},         // DM4310
@@ -26,7 +27,7 @@ Limit_param limit_param[Num_Of_Motor] = {
 
 Motor::Motor(MotorType motor_type, Motor_id Slave_id, Motor_id Master_id)
     : Master_id(Master_id), Slave_id(Slave_id), motor_type(motor_type) {
-  this->limit_param = damiao::limit_param[motor_type];
+  this->limit_param = motor::limit_param[motor_type];
 }
 
 void Motor::receive_data(float q, float dq, float tau) {
@@ -36,7 +37,7 @@ void Motor::receive_data(float q, float dq, float tau) {
 }
 
 
-Motor_Control::Motor_Control(void *hscant_handler)
+Motor_Control::Motor_Control(sockcanpp::CanDriver *hscant_handler)
     : hscant_handler(hscant_handler) {
 
   // const std::unordered_map<Motor_id, DmActData>& act_data)
@@ -48,7 +49,7 @@ Motor_Control::Motor_Control(void *hscant_handler)
   //                 item.second.mst_id); // 假设Motor的构造函数不需要参数
   //   addMotor(motor);
   // }
-
+  
   stop_update_thread_ = false;
   update_thread = std::thread(&Motor_Control::update_motor, this);
 }
@@ -134,7 +135,7 @@ void Motor_Control::control_mit(Motor &motor, float kp, float kd, float q,
   Can_Send_Frame send_data;
   Motor_id id = motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
-    LOGE("[damiao] Cant find motor with given id");
+    LOGE("[motor] Cant find motor with given id");
     return;
     // throw std::runtime_error("Motor_Control id not found");
   }
@@ -168,7 +169,7 @@ void Motor_Control::control_pos_vel(Motor &DM_Motor, float pos, float vel) {
   Can_Send_Frame send_data;
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
-    LOGE("[damiao] Cant find motor with given id");
+    LOGE("[motor] Cant find motor with given id");
     return;
   }
   std::array<uint8_t, 8> data_buf{};
@@ -185,7 +186,7 @@ void Motor_Control::control_vel(Motor &DM_Motor, float vel) {
   Can_Send_Frame send_data;
   Motor_id id = DM_Motor.GetSlaveId();
   if (motors.find(id) == motors.end()) {
-    LOGE("[damiao] Cant find motor with given id");
+    LOGE("[motor] Cant find motor with given id");
     return;
   }
   std::array<uint8_t, 8> data_buf = {0};
@@ -205,6 +206,15 @@ void Motor_Control::addMotor(
   disable();
 }
 
+void Motor_Control::addMotor(
+    std::vector<std::shared_ptr<Motor>> Motor_list) {
+  for (const auto &motor : Motor_list) {
+    motors.insert({motor->GetSlaveId(), motor});
+    motors.insert({motor->GetMasterId(), motor});
+  }
+  disable();
+}
+
 void Motor_Control::changeMotorLimit(Motor &DM_Motor, float P_MAX, float Q_MAX,
                                      float T_MAX) {
   limit_param[DM_Motor.GetMotorType()] = {P_MAX, Q_MAX, T_MAX};
@@ -213,11 +223,17 @@ void Motor_Control::changeMotorLimit(Motor &DM_Motor, float P_MAX, float Q_MAX,
 void Motor_Control::control_cmd(Motor_id id, uint8_t cmd) {
   std::array<uint8_t, 8> data_buf = {0xff, 0xff, 0xff, 0xff,
                                      0xff, 0xff, 0xff, cmd};
-  Can_Send_Frame send_data;
-  send_data.modify(id, data_buf.data());
+  // Can_Send_Frame send_data;
+  // send_data.modify(id, data_buf.data());
   // serial_->send((uint8_t *)&send_data, sizeof(can_send_frame));
   // send_queue.try_push(send_data);
-  hscant_handler->send_frame(send_data.canId, send_data.data, 8);
+  // hscant_handler->send_frame(send_data.canId, send_data.data, 8);
+  struct can_frame can_frame {};
+  can_frame.can_id = id;
+  can_frame.can_dlc = 8;
+  std::copy(data_buf.begin(), data_buf.end(), can_frame.data);
+  hscant_handler->sendMessage(sockcanpp::CanMessage(can_frame));
+
 }
 
 // 所有发送数据集中在这里，不阻塞主线程
@@ -225,9 +241,22 @@ void Motor_Control::update_motor() {
   while (!stop_update_thread_ || !send_queue.empty()) {
     Can_Send_Frame frame;
     if (send_queue.pop(frame)) {
-      hscant_handler->send_frame(frame.canId, frame.data, 8);
+      // hscant_handler->send_frame(frame.canId, frame.data, 8);
+      // define in linux/can.h
+      
+      struct can_frame can_frame {};
+      can_frame.can_id = frame.canId;
+      can_frame.can_dlc = 8;
+      std::copy(frame.data, frame.data + 8, can_frame.data);
+      auto msg = sockcanpp::CanMessage(can_frame);
+      // std::cout << "Sending CAN Message: " << msg << std::endl;
+      std::cout << send_queue.size() << std::endl;
+      auto start = std::chrono::steady_clock::now();
+      hscant_handler->sendMessage(msg);
       get_motor_data();
-      usleep(200);
+      auto end = std::chrono::steady_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+      std::cout << "Send duration: " << duration.count() << std::endl;
     }
   }
 }
@@ -258,13 +287,36 @@ void Motor_Control::read() {
 }
 
 void Motor_Control::get_motor_data() {
-  Can_Receive_Frame receive_data_t;
-  if (!hscant_handler->recv_frame(receive_data_t.canId, receive_data_t.canData, 8)) {
+  // if (!hscant_handler->recv_frame(receive_data_t.canId, receive_data_t.canData, 8)) {
+    // return;
+  // }
+  if (!hscant_handler->waitForMessages(1ms)) {
     return;
   }
-  // TODO(me): 状态码判断，receive_data.CMD只有使用达妙的can才能用
-  // 这里去掉CMD判断，默认由HSCanT类处理
-  // 电机故障码在canData[0]里，高
+
+  Can_Receive_Frame receive_data_t;
+  const auto msg = hscant_handler->readMessage();
+  receive_data_t.canId = msg.getCanId();
+  auto frame_data = msg.getFrameData();
+  std::copy(frame_data.begin(), frame_data.end(), receive_data_t.canData);
+  // TODO(me): 这里需要处理错误信息
+  const auto hasBusError = msg.hasBusError();
+  const auto hasBusOffError = msg.hasBusOffError();
+  const auto hasControllerProblem = msg.hasControllerProblem();
+  const auto hasControllerRestarted = msg.hasControllerRestarted();
+  const auto hasErrorCounter = msg.hasErrorCounter();
+  const auto hasLostArbitration = msg.hasLostArbitration();
+  const auto hasProtocolViolation = msg.hasProtocolViolation();
+  const auto hasTransceiverStatus = msg.hasTransceiverStatus();
+  const auto missingAckOnTransmit = msg.missingAckOnTransmit();
+  const auto isTxTimeout = msg.isTxTimeout();
+  const auto controllerError = msg.getControllerError();
+  const auto protocolError = msg.getProtocolError();
+  const auto transceiverError = msg.getTransceiverError();
+  const auto txErrorCounter = msg.getTxErrorCounter();
+  const auto rxErrorCounter = msg.getRxErrorCounter();
+  const auto arbitrationLostInBit = msg.arbitrationLostInBit();
+
   static auto uint_to_float = [](uint16_t x, float xmin, float xmax,
                                   uint8_t bits) -> float {
     float span = xmax - xmin;
@@ -280,7 +332,7 @@ void Motor_Control::get_motor_data() {
   uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
 
   if (motors.find(receive_data_t.canId) == motors.end()) {
-    LOGW("[damiao] Cant find motor by id: %X", receive_data_t.canId);
+    LOGW("[motor] Cant find motor by id: %X", receive_data_t.canId);
     return;
   }
   auto m = motors[receive_data_t.canId];
