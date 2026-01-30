@@ -1,7 +1,10 @@
-cmake_minimum_required(VERSION 3.0.2)
-project(dm_motor_ros)
+cmake_minimum_required(VERSION 3.10.2)
+project(motor_ros)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
+
+# 有朝一日用上ros2再说吧
+# add_subdirectory(lib/libsockcanpp)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -10,7 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_runtime
 )
 
-add_message_files(FILES DmCommand.msg DmState.msg)
+add_message_files(FILES Command.msg State.msg)
 generate_messages(DEPENDENCIES std_msgs)
 
 ###################################
@@ -31,21 +34,38 @@ include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
   ${PROJECT_SOURCE_DIR}/include
+  lib/libsockcanpp-prebuild/include
+  lib/libyaml-prebuild/include
+)
+add_library(sockcanpp STATIC IMPORTED)
+set_target_properties(sockcanpp PROPERTIES
+    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/lib/libsockcanpp-prebuild/libsockcanpp.a
 )
 
+add_library(yaml STATIC IMPORTED)
+set_target_properties(yaml PROPERTIES
+    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/lib/libyaml-prebuild/libyaml-cpp.a
+)
 # debug
 add_definitions(-DUSE_ROS)
 # add_definitions(-DUSE_ROS -Ddebug)
 
-add_executable(${PROJECT_NAME} src/rs_node.cpp src/damiao.cpp)
+add_executable(${PROJECT_NAME} src/motor_node.cpp src/motor.cpp)
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_generate_messages_cpp)
+
 
 target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
+  sockcanpp
+  yaml
   pthread
 )
+message(${CATKIN_PACKAGE_SHARE_DESTINATION})
 
-
+install(FILES
+   ${CMAKE_CURRENT_SOURCE_DIR}/conf/motors.yaml
+   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -94,12 +114,7 @@ target_link_libraries(${PROJECT_NAME}
 #   PATTERN ".svn" EXCLUDE
 # )
 
-## Mark other files for installation (e.g. launch and bag files, etc.)
-# install(FILES
-#   # myfile1
-#   # myfile2
-#   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-# )
+
 
 #############
 ## Testing ##

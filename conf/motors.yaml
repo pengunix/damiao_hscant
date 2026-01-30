@@ -1,0 +1,35 @@
+# Motor and Leg Configuration
+# This file defines the motor setup for all four legs of the robot
+
+# Global parameters
+global:
+  zero_position: 1.5707963267948  # π/2 radians
+
+# Motor definitions - each motor must have unique properties
+motors:
+  FL_M0:
+    motor_type: DM8009      # Motor model
+    slave_id: 0x01        # Slave CAN ID
+    master_id: 0x11       # Master CAN ID
+    initial_position: 0.0
+    direction: 1          # Rotation direction (1 or -1)
+    
+  FL_M1:
+    motor_type: RS02
+    slave_id: 0x04
+    master_id: 0x02
+    initial_position: 0.0
+    direction: 1
+    
+ 
+# Leg definitions
+legs:
+  FL:  # Front Left
+    name: "Front Left"
+    can_port: "can0"
+    num_motors: 2
+    motors: [FL_M0, FL_M1]
+    directions: [1, 1]
+    zero_position_indices: [0]  # Index of motors that use ZERO_POS as initial position
+    zero_position_offset: -1    # Offset sign for ZERO_POS (subtract for FL/BL)
+    
