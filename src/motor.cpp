@@ -79,7 +79,6 @@ void Motor_Control::enable() {
       control_cmd(it.second->GetSlaveId(), 0xFC);
       usleep(200);
     }
-    get_motor_data();
     usleep(200);
   }
 }

@@ -167,6 +167,8 @@ class MotorControlSystem {
       
       // Get handler for this CAN port
       auto handler = std::make_unique<sockcanpp::CanDriver>(leg_config.can_port, CAN_RAW);
+      // Set error filter to ignore non-critical errors
+      handler->setErrorFilter();
       leg_handlers_[leg_name] = std::move(handler);
       
       // Create motor controller
