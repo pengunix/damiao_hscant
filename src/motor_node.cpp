@@ -15,7 +15,6 @@ struct MotorConfig {
   motor::MotorType motor_type;
   uint8_t slave_id;
   uint8_t master_id;
-  float initial_position;
   int direction;
 };
 
@@ -25,7 +24,7 @@ struct LegConfig {
   int num_motors;
   std::vector<std::string> motor_names;
   std::vector<int> directions;
-  std::vector<int> zero_position_indices;
+  int zero_position_indices;
   int zero_position_offset;
 };
 
@@ -41,6 +40,9 @@ class MotorControlSystem {
  private:
   float zero_position_;
   std::map<std::string, MotorConfig> motor_configs_;
+
+  // I need this to keep the order of keys in leg_configs_ for consistent state message ordering
+  std::vector<std::string> leg_names_;
   std::map<std::string, LegConfig> leg_configs_;
   
   std::map<std::string, std::unique_ptr<sockcanpp::CanDriver>> leg_handlers_;
@@ -111,7 +113,6 @@ class MotorControlSystem {
         cfg.motor_type = stringToMotorType(motor_data["motor_type"].as<std::string>());
         cfg.slave_id = motor_data["slave_id"].as<uint8_t>();
         cfg.master_id = motor_data["master_id"].as<uint8_t>();
-        cfg.initial_position = motor_data["initial_position"].as<float>();
         cfg.direction = motor_data["direction"].as<int>();
         
         motor_configs_[motor_name] = cfg;
@@ -126,11 +127,12 @@ class MotorControlSystem {
       for (const auto& leg_node : config["legs"]) {
         std::string leg_name = leg_node.first.as<std::string>();
         YAML::Node leg_data = leg_node.second;
-        
+
         LegConfig cfg;
         cfg.name = leg_data["name"].as<std::string>();
         cfg.can_port = leg_data["can_port"].as<std::string>();
         cfg.num_motors = leg_data["num_motors"].as<int>();
+        cfg.zero_position_indices = leg_data["zero_position_indices"].as<int>();
         cfg.zero_position_offset = leg_data["zero_position_offset"].as<int>();
         
         // Load motor names
@@ -143,12 +145,8 @@ class MotorControlSystem {
           cfg.directions.push_back(dir.as<int>());
         }
         
-        // Load zero position indices
-        for (const auto& idx : leg_data["zero_position_indices"]) {
-          cfg.zero_position_indices.push_back(idx.as<int>());
-        }
-        
         leg_configs_[leg_name] = cfg;
+        leg_names_.push_back(leg_name);
       }
       
       LOGI("Configuration loaded successfully");
@@ -162,7 +160,10 @@ class MotorControlSystem {
   
   bool initialize() {    
     // Initialize each leg
-    for (const auto& [leg_name, leg_config] : leg_configs_) {
+    // In order to get the order, comment this line.
+    // for (const auto& [leg_name, leg_config] : leg_configs_) {
+    for (const auto& leg_name : leg_names_) {
+      const auto& leg_config = leg_configs_[leg_name];
       LOGI("Initializing leg: %s (CAN port %s)", leg_config.name.c_str(), leg_config.can_port.c_str());
       
       // Get handler for this CAN port
@@ -207,14 +208,6 @@ class MotorControlSystem {
           {0.0f, 0.0f, 0.0f, 0.0f, 0.0f}
       );
       
-      // Set initial positions for motors using ZERO_POS
-      for (int idx : leg_config.zero_position_indices) {
-        if (idx < leg_config.num_motors) {
-          float offset = zero_position_ * leg_config.zero_position_offset;
-          leg_commands_[leg_name][idx].q = offset;
-        }
-      }
-      
       // Add joint names to state message
       for (const auto& jname : joint_names_for_leg) {
         motor_state_msg_.joint_names.push_back(jname);
@@ -222,7 +215,9 @@ class MotorControlSystem {
     }
     
     // Enable all controllers
-    for (const auto& [leg_name, controller] : leg_controllers_) {
+    // for (const auto& [leg_name, controller] : leg_controllers_) {
+    for (const auto& leg_name : leg_names_) {
+      auto& controller = leg_controllers_[leg_name];
       controller->enable();
       LOGI("Enabled motor control for leg: %s", leg_name.c_str());
     }
@@ -231,7 +226,10 @@ class MotorControlSystem {
     ROS_INFO("=================================================");
     LOGI("Motor Initial Positions:");
     int motor_count = 0;
-    for (const auto& [leg_name, motors] : leg_motors_) {
+    // For order, also comment this line.
+    // for (const auto& [leg_name, motors] : leg_motors_) {
+    for (const auto& leg_name : leg_names_) {
+      const auto& motors = leg_motors_[leg_name];
       for (int i = 0; i < motors.size(); i++) {
         LOGI("  %s[%d] (ID: 0x%02X): %.4f",
              leg_name.c_str(), i,
@@ -251,7 +249,9 @@ class MotorControlSystem {
     
     // Map incoming commands to leg commands
     int cmd_index = 0;
-    for (const auto& [leg_name, leg_config] : leg_configs_) {
+    // for (const auto& [leg_name, leg_config] : leg_configs_) {
+    for (const auto& leg_name : leg_names_) {
+      const auto& leg_config = leg_configs_[leg_name];
       for (int i = 0; i < leg_config.num_motors; i++) {
         if (cmd_index < msg->pos.size()) {
           leg_commands_[leg_name][i] = {
@@ -271,7 +271,9 @@ class MotorControlSystem {
     std::lock_guard<std::mutex> lock(cmd_mutex_);
     
     // Send commands to all legs
-    for (const auto& [leg_name, leg_config] : leg_configs_) {
+    // for (const auto& [leg_name, leg_config] : leg_configs_) {
+    for (const auto & leg_name : leg_names_) {
+      const auto& leg_config = leg_configs_[leg_name];
       auto& commands = leg_commands_[leg_name];
       auto& motors = leg_motors_[leg_name];
       auto& controller = leg_controllers_[leg_name];
@@ -279,9 +281,7 @@ class MotorControlSystem {
       for (int i = 0; i < leg_config.num_motors; i++) {
         float offset = 0;
         // Check if this motor index uses zero position
-        if (std::find(leg_config.zero_position_indices.begin(),
-                      leg_config.zero_position_indices.end(), i) !=
-            leg_config.zero_position_indices.end()) {
+        if (leg_config.zero_position_indices == i) {
           offset = zero_position_ * leg_config.zero_position_offset;
         }
         
@@ -311,28 +311,27 @@ class MotorControlSystem {
     motor_state_msg_.vel.clear();
     motor_state_msg_.tau.clear();
     
-    for (const auto& [leg_name, leg_config] : leg_configs_) {
+    // For order, also comment this line.
+    // for (const auto& [leg_name, leg_config] : leg_configs_) {
+    for (const auto& leg_name : leg_names_) {
+      const auto& leg_config = leg_configs_[leg_name];
       auto& motors = leg_motors_[leg_name];
       
       for (int i = 0; i < motors.size(); i++) {
         float pos = motors[i]->Get_Position();
         float vel = motors[i]->Get_Velocity();
         float tau = motors[i]->Get_tau();
-        
-        // Check if this motor index uses zero position and apply offset
-        if (std::find(leg_config.zero_position_indices.begin(),
-                      leg_config.zero_position_indices.end(), i) !=
-            leg_config.zero_position_indices.end()) {
-          pos += zero_position_ * leg_config.zero_position_offset;
-        }
-        
+
         // Apply direction multiplier
         if (leg_config.directions[i] == -1) {
           pos = -pos;
           vel = -vel;
           tau = -tau;
         }
-        
+        // Check if this motor index uses zero position and apply offset
+        if (leg_config.zero_position_indices == i) {
+          pos -= zero_position_ ;
+        }
         motor_state_msg_.pos.push_back(pos);
         motor_state_msg_.vel.push_back(vel);
         motor_state_msg_.tau.push_back(tau);
