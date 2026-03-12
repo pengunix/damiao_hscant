@@ -286,12 +286,9 @@ class MotorControlSystem {
         }
         
         // Apply direction multiplier and offset
-        float q_cmd = commands[i].q * leg_config.directions[i] - offset;
+        float q_cmd = commands[i].q * leg_config.directions[i] + offset;
         float dq_cmd = commands[i].dq * leg_config.directions[i];
         float tau_cmd = commands[i].tau * leg_config.directions[i];
-        // std::cout << "Motor " << motors[i]->GetSlaveId() << " Command: q="
-        //           << q_cmd << ", dq=" << dq_cmd << ", tau=" << tau_cmd << std::endl;
-        // std::cout << "kp=" << commands[i].kp << ", kd=" << commands[i].kd << std::endl;
         
         controller->control_mit(
             *motors[i],
