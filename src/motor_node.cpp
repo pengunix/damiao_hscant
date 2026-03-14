@@ -15,7 +15,6 @@ struct MotorConfig {
   motor::MotorType motor_type;
   uint8_t slave_id;
   uint8_t master_id;
-  int direction;
 };
 
 struct LegConfig {
@@ -113,7 +112,6 @@ class MotorControlSystem {
         cfg.motor_type = stringToMotorType(motor_data["motor_type"].as<std::string>());
         cfg.slave_id = motor_data["slave_id"].as<uint8_t>();
         cfg.master_id = motor_data["master_id"].as<uint8_t>();
-        cfg.direction = motor_data["direction"].as<int>();
         
         motor_configs_[motor_name] = cfg;
       }
@@ -320,11 +318,9 @@ class MotorControlSystem {
         float tau = motors[i]->Get_tau();
 
         // Apply direction multiplier
-        if (leg_config.directions[i] == -1) {
-          pos = -pos;
-          vel = -vel;
-          tau = -tau;
-        }
+        pos *= leg_config.directions[i];
+        vel *= leg_config.directions[i];
+        tau *= leg_config.directions[i];
         // Check if this motor index uses zero position and apply offset
         if (leg_config.zero_position_indices == i) {
           pos -= zero_position_ ;

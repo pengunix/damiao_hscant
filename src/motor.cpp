@@ -28,6 +28,12 @@ Limit_param limit_param[Num_Of_Motor] = {
 Motor::Motor(MotorType motor_type, Motor_id Slave_id, Motor_id Master_id)
     : Master_id(Master_id), Slave_id(Slave_id), motor_type(motor_type) {
   this->limit_param = motor::limit_param[motor_type];
+
+  LOGI("Motor created: Slave ID %u, Master ID %u, Type %d", Slave_id, Master_id,
+       motor_type);
+  LOGI("limit_param: Q_MAX %.2f, TAU_MAX %.2f, KP_MAX %.2f, KD_MAX %.2f",
+        this->limit_param.Q_MAX, this->limit_param.TAU_MAX,
+        this->limit_param.KP_MAX, this->limit_param.KD_MAX);
 }
 
 void Motor::receive_data(float q, float dq, float tau) {
@@ -312,35 +318,45 @@ void Motor_Control::get_motor_data() {
   // print detailed error info
   if (hasBusError) {
     LOGW("  Bus Error");
+    return;
   }
   if (hasBusOffError) {
     LOGW("  Bus Off Error");
+    return;
   } 
   if (hasControllerProblem) {
     LOGW("  Controller Problem");
+    return;
   }
   if (hasControllerRestarted) {
     LOGW("  Controller Restarted");
+    return;
   }
   if (hasErrorCounter) {
     LOGW("  Error Counter - TX: %lu, RX: %lu", txErrorCounter, rxErrorCounter);
+    return;
   }
   if (hasLostArbitration) {
     LOGW("  Lost Arbitration at Bit: %u", arbitrationLostInBit);
+    return;
   }
   if (hasProtocolViolation) { 
     LOGW("  Protocol Violation");
+    return;
     // check protocolError for more details
   }
   if (hasTransceiverStatus) {
     LOGW("  Transceiver Status Error");
+    return;
     // check transceiverError for more details
   }
   if (missingAckOnTransmit) {
     LOGW("  Missing Acknowledgment on Transmit");
+    return;
   }
   if (isTxTimeout) {
     LOGW("  Transmission Timeout");
+    return;
   }
 
 

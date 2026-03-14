@@ -8,113 +8,119 @@ global:
 # Motor definitions - each motor must have unique properties
 motors:
   FL_M0:
-    motor_type: DM8006      # Motor model
+    motor_type: RS06      # Motor model
     slave_id: 0x01        # Slave CAN ID
-    master_id: 0x11       # Master CAN ID
-    direction: 1          # Rotation direction (1 or -1)
+    master_id: 0x0B       # Master CAN ID
     
   FL_M1:
-    motor_type: DM8006
+    motor_type: RS06
     slave_id: 0x02
-    master_id: 0x12
-    direction: 1
+    master_id: 0x0C
     
   FL_M2:
-    motor_type: DM8006
+    motor_type: RS03
     slave_id: 0x03
-    master_id: 0x13
-    direction: -1
+    master_id: 0x0D
+    
+  FL_M3:
+    motor_type: RS02
+    slave_id: 0x04
+    master_id: 0x0E
     
   FR_M0:
-    motor_type: DM8006
+    motor_type: RS06
     slave_id: 0x01
-    master_id: 0x11
-    direction: 1
+    master_id: 0x0B
     
   FR_M1:
-    motor_type: DM8006
+    motor_type: RS06
     slave_id: 0x02
-    master_id: 0x12
-    direction: -1
+    master_id: 0x0C
     
   FR_M2:
-    motor_type: DM8006
+    motor_type: RS03
     slave_id: 0x03
-    master_id: 0x13
-    direction: 1
+    master_id: 0x0D
+    
+  FR_M3:
+    motor_type: RS02
+    slave_id: 0x04
+    master_id: 0x0E
     
   BL_M0:
-    motor_type: DM8006
+    motor_type: RS06
     slave_id: 0x01
-    master_id: 0x11
-    direction: -1
+    master_id: 0x0B
     
   BL_M1:
-    motor_type: DM8006
+    motor_type: RS06
     slave_id: 0x02
-    master_id: 0x12
-    direction: 1
+    master_id: 0x0C
     
   BL_M2:
-    motor_type: DM8006
+    motor_type: RS03
     slave_id: 0x03
-    master_id: 0x13
-    direction: -1
+    master_id: 0x0D
     
-      
+  BL_M3:
+    motor_type: RS02
+    slave_id: 0x04
+    master_id: 0x0E
+    
   BR_M0:
-    motor_type: DM8006
+    motor_type: RS06
     slave_id: 0x01
-    master_id: 0x11
-    direction: -1
+    master_id: 0x0B
     
   BR_M1:
-    motor_type: DM8006
+    motor_type: RS06
     slave_id: 0x02
-    master_id: 0x12
-    direction: -1
+    master_id: 0x0C
     
   BR_M2:
-    motor_type: DM8006
+    motor_type: RS03
     slave_id: 0x03
-    master_id: 0x13
-    direction: 1
+    master_id: 0x0D
     
-  
+  BR_M3:
+    motor_type: RS02
+    slave_id: 0x04
+    master_id: 0x0E
+
 # Leg definitions
 legs:
   FL:  # Front Left
     name: "Front Left"
     can_port: "can0"
-    num_motors: 3
-    motors: [FL_M0, FL_M1, FL_M2]
-    directions: [1, 1, -1]
+    num_motors: 4
+    motors: [FL_M0, FL_M1, FL_M2, FL_M3]
+    directions: [-1, -1, 1, -1]
     zero_position_indices: 2  # Index of motors that use ZERO_POS as initial position
-    zero_position_offset: -1    # Offset sign for ZERO_POS (subtract for FL/BL)
+    zero_position_offset: 1    # Offset sign for ZERO_POS (subtract for FL/BL)
     
   FR:  # Front Right
     name: "Front Right"
     can_port: "can1"
-    num_motors: 3
-    motors: [FR_M0, FR_M1, FR_M2]
-    directions: [1, -1, 1]
+    num_motors: 4
+    motors: [FR_M0, FR_M1, FR_M2, FR_M3]
+    directions: [-1, 1, -1, 1]
     zero_position_indices: 2
-    zero_position_offset: 1     # Add ZERO_POS for FR/BR
+    zero_position_offset: -1     # Add ZERO_POS for FR/BR
     
   BL:  # Back Left
     name: "Back Left"
     can_port: "can2"
-    num_motors: 3
-    motors: [BL_M0, BL_M1, BL_M2]
-    directions: [-1, 1, -1]
+    num_motors: 4
+    motors: [BL_M0, BL_M1, BL_M2, BL_M3]
+    directions: [1, -1, 1, -1]
     zero_position_indices: 2
-    zero_position_offset: -1
+    zero_position_offset: 1
     
   BR:  # Back Right
     name: "Back Right"
     can_port: "can3"
-    num_motors: 3
-    motors: [BR_M0, BR_M1, BR_M2]
-    directions: [-1, -1, 1]
-    zero_position_indices: 2     # I want to move this to the motor parameters, but for now it's easier to keep it here since it's leg-specific
-    zero_position_offset: 1
+    num_motors: 4
+    motors: [BR_M0, BR_M1, BR_M2, BR_M3]
+    directions: [-1, 1, -1, 1]
+    zero_position_indices: 2
+    zero_position_offset: -1
