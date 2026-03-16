@@ -317,45 +317,45 @@ void Motor_Control::get_motor_data() {
   const auto arbitrationLostInBit = msg.arbitrationLostInBit();
   // print detailed error info
   if (hasBusError) {
-    LOGW("  Bus Error");
+    LOGW("  %s: Bus Error", hscant_handler->getCanInterface().c_str());
     return;
   }
   if (hasBusOffError) {
-    LOGW("  Bus Off Error");
+    LOGW("  %s: Bus Off Error", hscant_handler->getCanInterface().c_str());
     return;
   } 
   if (hasControllerProblem) {
-    LOGW("  Controller Problem");
+    LOGW("  %s: Controller Problem",  hscant_handler->getCanInterface().c_str());
     return;
   }
   if (hasControllerRestarted) {
-    LOGW("  Controller Restarted");
+    LOGW("  %s: Controller Restarted", hscant_handler->getCanInterface().c_str() );
     return;
   }
   if (hasErrorCounter) {
-    LOGW("  Error Counter - TX: %lu, RX: %lu", txErrorCounter, rxErrorCounter);
+    LOGW("  %s: Error Counter - TX: %lu, RX: %lu", hscant_handler->getCanInterface().c_str(), txErrorCounter, rxErrorCounter);
     return;
   }
   if (hasLostArbitration) {
-    LOGW("  Lost Arbitration at Bit: %u", arbitrationLostInBit);
+    LOGW("  %s: Lost Arbitration at Bit: %u", hscant_handler->getCanInterface().c_str(), arbitrationLostInBit);
     return;
   }
   if (hasProtocolViolation) { 
-    LOGW("  Protocol Violation");
+    LOGW("  %s: Protocol Violation", hscant_handler->getCanInterface().c_str());
     return;
     // check protocolError for more details
   }
   if (hasTransceiverStatus) {
-    LOGW("  Transceiver Status Error");
+    LOGW("  %s: Transceiver Status Error", hscant_handler->getCanInterface().c_str());
     return;
     // check transceiverError for more details
   }
   if (missingAckOnTransmit) {
-    LOGW("  Missing Acknowledgment on Transmit");
+    LOGW("  %s: Missing Acknowledgment on Transmit", hscant_handler->getCanInterface().c_str());
     return;
   }
   if (isTxTimeout) {
-    LOGW("  Transmission Timeout");
+    LOGW("  %s: Transmission Timeout", hscant_handler->getCanInterface().c_str());
     return;
   }
 

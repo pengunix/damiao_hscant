@@ -311,7 +311,6 @@ class MotorControlSystem {
     for (const auto& leg_name : leg_names_) {
       const auto& leg_config = leg_configs_[leg_name];
       auto& motors = leg_motors_[leg_name];
-      
       for (int i = 0; i < motors.size(); i++) {
         float pos = motors[i]->Get_Position();
         float vel = motors[i]->Get_Velocity();
@@ -323,7 +322,7 @@ class MotorControlSystem {
         tau *= leg_config.directions[i];
         // Check if this motor index uses zero position and apply offset
         if (leg_config.zero_position_indices == i) {
-          pos -= zero_position_ ;
+          pos -= zero_position_;
         }
         motor_state_msg_.pos.push_back(pos);
         motor_state_msg_.vel.push_back(vel);
@@ -396,7 +395,7 @@ int main(int argc, char** argv) {
   }
   
   // Setup ROS subscribers and publishers
-  ros::Rate loop_rate(100);
+  ros::Rate loop_rate(500);
   boost::function<void(const motor_ros::CommandConstPtr &)> callback =
       [&](const motor_ros::CommandConstPtr &msg) -> void {
         if (g_motor_system) {
@@ -405,14 +404,14 @@ int main(int argc, char** argv) {
       };
 
   ros::Subscriber cmd_sub = nh->subscribe<motor_ros::Command>(
-      "/dm_cmd", 5, callback);
+      "/dm_cmd", 10, callback);
   
-  ros::Publisher state_pub = nh->advertise<motor_ros::State>("/dm_states", 5);
+  ros::Publisher state_pub = nh->advertise<motor_ros::State>("/dm_states", 10);
   
   ros::AsyncSpinner async_spinner(4);
   async_spinner.start();
   
-  LOGI("Motor node started, running at 100Hz");
+  LOGI("Motor node started, running at 500Hz");
   
   while (ros::ok()) {
     g_motor_system->controlStep();
