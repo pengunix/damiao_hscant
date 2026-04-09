@@ -16,6 +16,6 @@ sudo ip link set up can1
 sudo ip link set up can2
 sudo ip link set up can3
 
-roslaunch motor_ros motor_node.launch &
+ros2 launch motor_ros motor_node.launch.py &
 wait
 exit 0

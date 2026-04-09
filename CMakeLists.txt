@@ -1,131 +1,60 @@
-cmake_minimum_required(VERSION 3.10.2)
+cmake_minimum_required(VERSION 3.23)
 project(motor_ros)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
 
-# 有朝一日用上ros2再说吧
-# add_subdirectory(lib/libsockcanpp)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
-find_package(catkin REQUIRED COMPONENTS
-  roscpp
-  std_msgs
-  message_generation
-  message_runtime
+# 这个奇怪的变量居然在ROS库里也存在，打开就没办法找到共享库
+# set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(sockcanpp_CONCEPT_SUPPORT OFF CACHE BOOL "" FORCE)
+add_subdirectory(lib/libsockcanpp)
+
+# Generate ROS2 message interfaces
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/Command.msg"
+  "msg/State.msg"
+  DEPENDENCIES std_msgs
 )
 
-add_message_files(FILES Command.msg State.msg)
-generate_messages(DEPENDENCIES std_msgs)
-
-###################################
-## catkin specific configuration ##
-###################################
-catkin_package(
-  INCLUDE_DIRS include
-  CATKIN_DEPENDS message_runtime message_generation roscpp std_msgs 
-#  DEPENDS system_lib
-#  LIBRARIES dm_motor
-  
-)
-
-###########
-## Build ##
-###########
-include_directories(
-# include
-  ${catkin_INCLUDE_DIRS}
-  ${PROJECT_SOURCE_DIR}/include
-  lib/libsockcanpp-prebuild/include
-  lib/libyaml-prebuild/include
-)
-add_library(sockcanpp STATIC IMPORTED)
-set_target_properties(sockcanpp PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/lib/libsockcanpp-prebuild/libsockcanpp.a
-)
-
-add_library(yaml STATIC IMPORTED)
-set_target_properties(yaml PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/lib/libyaml-prebuild/libyaml-cpp.a
-)
-# debug
 add_definitions(-DUSE_ROS)
-# add_definitions(-DUSE_ROS -Ddebug)
 
-add_executable(${PROJECT_NAME} src/motor_node.cpp src/motor.cpp)
-add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_generate_messages_cpp)
+add_executable(motor_node src/motor_node.cpp src/motor.cpp)
 
+target_include_directories(motor_node PRIVATE
+  ${PROJECT_SOURCE_DIR}/include
+  ${PROJECT_SOURCE_DIR}/lib/libsockcanpp/include
+)
 
-target_link_libraries(${PROJECT_NAME}
-  ${catkin_LIBRARIES}
+ament_target_dependencies(motor_node rclcpp std_msgs)
+
+# Link generated message typesupport
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
+target_link_libraries(motor_node
+  ${cpp_typesupport_target}
   sockcanpp
-  yaml
+  yaml-cpp
   pthread
 )
-message(${CATKIN_PACKAGE_SHARE_DESTINATION})
 
-install(FILES
-   ${CMAKE_CURRENT_SOURCE_DIR}/conf/motors.yaml
-   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+install(TARGETS motor_node
+  DESTINATION lib/${PROJECT_NAME}
 )
-install(PROGRAMS scripts/setup_can.sh DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/scripts)
 
-## Rename C++ executable without prefix
-## The above recommended prefix causes long target names, the following renames the
-## target back to the shorter version for ease of user use
-## e.g. "rosrun someones_pkg node" instead of "rosrun someones_pkg someones_pkg_node"
-# set_target_properties(${PROJECT_NAME}_node PROPERTIES OUTPUT_NAME node PREFIX "")
+install(DIRECTORY conf/
+  DESTINATION share/${PROJECT_NAME}/conf
+)
 
-## Add cmake target dependencies of the executable
-## same as for the library above
-# add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
 
+install(PROGRAMS scripts/setup_can.sh
+  DESTINATION share/${PROJECT_NAME}/scripts
+)
 
-
-#############
-## Install ##
-#############
-
-# all install targets should use catkin DESTINATION variables
-# See http://ros.org/doc/api/catkin/html/adv_user_guide/variables.html
-
-## Mark executable scripts (Python etc.) for installation
-## in contrast to setup.py, you can choose the destination
-# catkin_install_python(PROGRAMS
-#   scripts/my_python_script
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
-
-## Mark executables for installation
-## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
-# install(TARGETS ${PROJECT_NAME}_node
-#   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
-
-## Mark libraries for installation
-## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_libraries.html
-# install(TARGETS ${PROJECT_NAME}
-#   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
-# )
-
-## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
-
-
-
-#############
-## Testing ##
-#############
-
-## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_dm_node.cpp)
-# if(TARGET ${PROJECT_NAME}-test)
-#   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
-# endif()
-
-## Add folders to be run by python nosetests
-# catkin_add_nosetests(test)
+ament_package()

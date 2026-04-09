@@ -1,10 +1,9 @@
 #include <yaml-cpp/yaml.h>
 #include <CanDriver.hpp>
 #include "motor.h"
-#include "motor_ros/Command.h"
-#include "motor_ros/State.h"
-#include "ros/ros.h"
-#include "ros/package.h"
+#include "motor_ros/msg/command.hpp"
+#include "motor_ros/msg/state.hpp"
+#include <rclcpp/rclcpp.hpp>
 #include <csignal>
 #include <iostream>
 #include <map>
@@ -50,7 +49,7 @@ class MotorControlSystem {
   std::map<std::string, std::vector<MotorCommand>> leg_commands_;
   
   std::mutex cmd_mutex_;
-  motor_ros::State motor_state_msg_;
+  motor_ros::msg::State motor_state_msg_;
   
   // Helper function to convert string motor type to enum
   motor::MotorType stringToMotorType(const std::string& type_str) {
@@ -156,10 +155,8 @@ class MotorControlSystem {
     }
   }
   
-  bool initialize() {    
+  bool initialize(rclcpp::Logger logger) {    
     // Initialize each leg
-    // In order to get the order, comment this line.
-    // for (const auto& [leg_name, leg_config] : leg_configs_) {
     for (const auto& leg_name : leg_names_) {
       const auto& leg_config = leg_configs_[leg_name];
       LOGI("Initializing leg: %s (CAN port %s)", leg_config.name.c_str(), leg_config.can_port.c_str());
@@ -184,12 +181,12 @@ class MotorControlSystem {
         }
         
         const MotorConfig& mcfg = motor_configs_[motor_name];
-        auto motor = std::make_shared<motor::Motor>(
+        auto motor_ptr = std::make_shared<motor::Motor>(
             mcfg.motor_type,
             mcfg.slave_id,
             mcfg.master_id
         );
-        motors.push_back(motor);
+        motors.push_back(motor_ptr);
         joint_names_for_leg.push_back(motor_name);
       }
       
@@ -213,7 +210,6 @@ class MotorControlSystem {
     }
     
     // Enable all controllers
-    // for (const auto& [leg_name, controller] : leg_controllers_) {
     for (const auto& leg_name : leg_names_) {
       auto& controller = leg_controllers_[leg_name];
       controller->enable();
@@ -221,33 +217,30 @@ class MotorControlSystem {
     }
     
     // Print initial positions
-    ROS_INFO("=================================================");
+    RCLCPP_INFO(logger, "=================================================");
     LOGI("Motor Initial Positions:");
     int motor_count = 0;
-    // For order, also comment this line.
-    // for (const auto& [leg_name, motors] : leg_motors_) {
     for (const auto& leg_name : leg_names_) {
       const auto& motors = leg_motors_[leg_name];
-      for (int i = 0; i < motors.size(); i++) {
-        LOGI("  %s[%d] (ID: 0x%02X): %.4f",
+      for (size_t i = 0; i < motors.size(); i++) {
+        LOGI("  %s[%zu] (ID: 0x%02X): %.4f",
              leg_name.c_str(), i,
              motors[i]->GetSlaveId(),
              motors[i]->Get_Position());
         motor_count++;
       }
     }
-    ROS_INFO("Total motors: %d", motor_count);
-    ROS_INFO("=================================================");
+    RCLCPP_INFO(logger, "Total motors: %d", motor_count);
+    RCLCPP_INFO(logger, "=================================================");
     
     return true;
   }
   
-  void cmdCallback(const motor_ros::CommandConstPtr& msg) {
+  void cmdCallback(const motor_ros::msg::Command::SharedPtr msg) {
     std::lock_guard<std::mutex> lock(cmd_mutex_);
     
     // Map incoming commands to leg commands
-    int cmd_index = 0;
-    // for (const auto& [leg_name, leg_config] : leg_configs_) {
+    size_t cmd_index = 0;
     for (const auto& leg_name : leg_names_) {
       const auto& leg_config = leg_configs_[leg_name];
       for (int i = 0; i < leg_config.num_motors; i++) {
@@ -269,7 +262,6 @@ class MotorControlSystem {
     std::lock_guard<std::mutex> lock(cmd_mutex_);
     
     // Send commands to all legs
-    // for (const auto& [leg_name, leg_config] : leg_configs_) {
     for (const auto & leg_name : leg_names_) {
       const auto& leg_config = leg_configs_[leg_name];
       auto& commands = leg_commands_[leg_name];
@@ -306,12 +298,10 @@ class MotorControlSystem {
     motor_state_msg_.vel.clear();
     motor_state_msg_.tau.clear();
     
-    // For order, also comment this line.
-    // for (const auto& [leg_name, leg_config] : leg_configs_) {
     for (const auto& leg_name : leg_names_) {
       const auto& leg_config = leg_configs_[leg_name];
       auto& motors = leg_motors_[leg_name];
-      for (int i = 0; i < motors.size(); i++) {
+      for (size_t i = 0; i < motors.size(); i++) {
         float pos = motors[i]->Get_Position();
         float vel = motors[i]->Get_Velocity();
         float tau = motors[i]->Get_tau();
@@ -321,7 +311,7 @@ class MotorControlSystem {
         vel *= leg_config.directions[i];
         tau *= leg_config.directions[i];
         // Check if this motor index uses zero position and apply offset
-        if (leg_config.zero_position_indices == i) {
+        if (leg_config.zero_position_indices == static_cast<int>(i)) {
           pos -= zero_position_;
         }
         motor_state_msg_.pos.push_back(pos);
@@ -331,8 +321,8 @@ class MotorControlSystem {
     }
   }
   
-  void publishState(ros::Publisher& pub) {
-    pub.publish(motor_state_msg_);
+  void publishState(rclcpp::Publisher<motor_ros::msg::State>::SharedPtr& pub) {
+    pub->publish(motor_state_msg_);
   }
   
   void shutdown() {
@@ -347,7 +337,7 @@ class MotorControlSystem {
     leg_handlers_.clear();
   }
   
-  const motor_ros::State& getMotorState() const {
+  const motor_ros::msg::State& getMotorState() const {
     return motor_state_msg_;
   }
 };
@@ -359,12 +349,12 @@ extern "C" void sigint_handler(int signal) {
   if (g_motor_system) {
     g_motor_system->shutdown();
   }
-  ros::shutdown();
+  rclcpp::shutdown();
 }
 
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "motor_node");
-  auto nh = std::make_unique<ros::NodeHandle>();
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<rclcpp::Node>("motor_node");
   
   // Get config file path from parameter or use default
   std::string config_file;
@@ -383,7 +373,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   
-  if (!g_motor_system->initialize()) {
+  if (!g_motor_system->initialize(node->get_logger())) {
     LOGE("Failed to initialize motor control system");
     return 1;
   }
@@ -395,25 +385,25 @@ int main(int argc, char** argv) {
   }
   
   // Setup ROS subscribers and publishers
-  ros::Rate loop_rate(500);
-  boost::function<void(const motor_ros::CommandConstPtr &)> callback =
-      [&](const motor_ros::CommandConstPtr &msg) -> void {
+  rclcpp::Rate loop_rate(500);
+
+  auto cmd_sub = node->create_subscription<motor_ros::msg::Command>(
+      "/dm_cmd", 10,
+      [&](const motor_ros::msg::Command::SharedPtr msg) -> void {
         if (g_motor_system) {
           g_motor_system->cmdCallback(msg);
         }
-      };
-
-  ros::Subscriber cmd_sub = nh->subscribe<motor_ros::Command>(
-      "/dm_cmd", 10, callback);
+      });
   
-  ros::Publisher state_pub = nh->advertise<motor_ros::State>("/dm_states", 10);
+  auto state_pub = node->create_publisher<motor_ros::msg::State>("/dm_states", 10);
   
-  ros::AsyncSpinner async_spinner(4);
-  async_spinner.start();
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+  executor.add_node(node);
+  std::thread executor_thread([&executor]() { executor.spin(); });
   
   LOGI("Motor node started, running at 500Hz");
   
-  while (ros::ok()) {
+  while (rclcpp::ok()) {
     g_motor_system->controlStep();
     g_motor_system->updateState();
     g_motor_system->publishState(state_pub);
@@ -422,5 +412,9 @@ int main(int argc, char** argv) {
   }
   
   g_motor_system->shutdown();
+  executor.cancel();
+  if (executor_thread.joinable()) {
+    executor_thread.join();
+  }
   return 0;
 }
