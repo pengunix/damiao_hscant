@@ -19,7 +19,7 @@ struct MotorConfig {
 struct LegConfig {
   std::string name;
   std::string can_port;
-  int num_motors; // Now not from yaml
+  int num_motors; // Now not from yaml // Now not from yaml
   std::vector<std::string> motor_names;
   std::vector<int> directions;
   int zero_position_indices;
@@ -37,6 +37,7 @@ struct MotorCommand {
 class MotorControlSystem {
  private:
   float zero_position_;
+  float calf_gear_ratio_;
   std::map<std::string, MotorConfig> motor_configs_;
 
   // I need this to keep the order of keys in leg_configs_ for consistent state message ordering
@@ -84,7 +85,7 @@ class MotorControlSystem {
   }
   
  public:
-  MotorControlSystem() : zero_position_(1.5707963267948) {}
+  MotorControlSystem() : zero_position_(1.5707963267948), calf_gear_ratio_(1.5) {}
   
   bool loadConfiguration(const std::string& config_file) {
     try {
@@ -95,7 +96,7 @@ class MotorControlSystem {
         return false;
       }
       zero_position_ = config["global"]["zero_position"].as<float>();
-      
+      calf_gear_ratio_ = config["global"]["calf_gear_ratio"].as<float>();
       // Load motor configurations
       if (!config["motors"]) {
         LOGE("Missing 'motors' section in config file");
@@ -128,15 +129,14 @@ class MotorControlSystem {
         LegConfig cfg;
         cfg.name = leg_data["name"].as<std::string>();
         cfg.can_port = leg_data["can_port"].as<std::string>();
-        //cfg.num_motors = leg_data["num_motors"].as<int>();
-	cfg.num_motors = 0;
+        cfg.num_motors = 0;
         cfg.zero_position_indices = leg_data["zero_position_indices"].as<int>();
         cfg.zero_position_offset = leg_data["zero_position_offset"].as<int>();
         
         // Load motor names
         for (const auto& motor_ref : leg_data["motors"]) {
           cfg.motor_names.push_back(motor_ref.as<std::string>());
-	  cfg.num_motors++;
+          cfg.num_motors++;
         }
         
         // Load directions
@@ -272,15 +272,18 @@ class MotorControlSystem {
       
       for (int i = 0; i < leg_config.num_motors; i++) {
         float offset = 0;
+        float gear_ratio = 1.0f;
         // Check if this motor index uses zero position
         if (leg_config.zero_position_indices == i) {
           offset = zero_position_ * leg_config.zero_position_offset;
+          gear_ratio = calf_gear_ratio_;
         }
         
         // Apply direction multiplier and offset
         float q_cmd = commands[i].q * leg_config.directions[i] + offset;
-        float dq_cmd = commands[i].dq * leg_config.directions[i];
-        float tau_cmd = commands[i].tau * leg_config.directions[i];
+        // Apply gear ratio
+        float dq_cmd = commands[i].dq * leg_config.directions[i] * gear_ratio;
+        float tau_cmd = commands[i].tau * leg_config.directions[i] / gear_ratio;
         
         controller->control_mit(
             *motors[i],
@@ -315,6 +318,8 @@ class MotorControlSystem {
         // Check if this motor index uses zero position and apply offset
         if (leg_config.zero_position_indices == static_cast<int>(i)) {
           pos -= zero_position_;
+          vel /= calf_gear_ratio_;
+          tau *= calf_gear_ratio_;
         }
         motor_state_msg_.pos.push_back(pos);
         motor_state_msg_.vel.push_back(vel);
