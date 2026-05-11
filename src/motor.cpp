@@ -351,7 +351,8 @@ void Motor_Control::get_motor_data() {
     // check transceiverError for more details
   }
   if (missingAckOnTransmit) {
-    LOGW("  %s: Missing Acknowledgment on Transmit", hscant_handler->getCanInterface().c_str());
+    // LOGW("  %s: Missing Acknowledgment on Transmit", hscant_handler->getCanInterface().c_str());
+    printf("\r %s: Missing Acknowledgment on Transmit", hscant_handler->getCanInterface().c_str());
     return;
   }
   if (isTxTimeout) {

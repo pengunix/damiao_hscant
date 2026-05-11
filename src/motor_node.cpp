@@ -20,7 +20,7 @@ struct MotorConfig {
 struct LegConfig {
   std::string name;
   std::string can_port;
-  int num_motors;
+  int num_motors; // Now not from yaml
   std::vector<std::string> motor_names;
   std::vector<int> directions;
   int zero_position_indices;
@@ -129,13 +129,15 @@ class MotorControlSystem {
         LegConfig cfg;
         cfg.name = leg_data["name"].as<std::string>();
         cfg.can_port = leg_data["can_port"].as<std::string>();
-        cfg.num_motors = leg_data["num_motors"].as<int>();
+        //cfg.num_motors = leg_data["num_motors"].as<int>();
+	cfg.num_motors = 0;
         cfg.zero_position_indices = leg_data["zero_position_indices"].as<int>();
         cfg.zero_position_offset = leg_data["zero_position_offset"].as<int>();
         
         // Load motor names
         for (const auto& motor_ref : leg_data["motors"]) {
           cfg.motor_names.push_back(motor_ref.as<std::string>());
+	  cfg.num_motors++;
         }
         
         // Load directions
@@ -395,7 +397,7 @@ int main(int argc, char** argv) {
   }
   
   // Setup ROS subscribers and publishers
-  ros::Rate loop_rate(500);
+  ros::Rate loop_rate(200);
   boost::function<void(const motor_ros::CommandConstPtr &)> callback =
       [&](const motor_ros::CommandConstPtr &msg) -> void {
         if (g_motor_system) {
