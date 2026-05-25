@@ -387,7 +387,7 @@ int main(int argc, char** argv) {
   }
   
   // Setup ROS subscribers and publishers
-  rclcpp::Rate loop_rate(500);
+  rclcpp::Rate loop_rate(200);
 
   auto cmd_sub = node->create_subscription<motor_ros::msg::Command>(
       "/dm_cmd", 10,
@@ -403,7 +403,7 @@ int main(int argc, char** argv) {
   executor.add_node(node);
   std::thread executor_thread([&executor]() { executor.spin(); });
   
-  LOGI("Motor node started, running at 500Hz");
+  LOGI("Motor node started, running at 200Hz");
   
   while (rclcpp::ok()) {
     g_motor_system->controlStep();

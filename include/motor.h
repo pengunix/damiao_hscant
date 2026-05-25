@@ -20,6 +20,7 @@
 #include <variant>
 #include <vector>
 #include <linux/can.h>
+#include <chrono>
 
 #define POS_MODE 0x100
 #define SPEED_MODE 0x200
