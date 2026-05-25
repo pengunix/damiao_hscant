@@ -28,11 +28,11 @@
 #define retry_interval 50000
 
 #ifdef USE_ROS
-#include <ros/ros.h>
-#define LOGD(...) ROS_DEBUG(__VA_ARGS__)
-#define LOGI(...) ROS_INFO(__VA_ARGS__)
-#define LOGW(...) ROS_WARN(__VA_ARGS__)
-#define LOGE(...) ROS_ERROR(__VA_ARGS__)
+#include <rclcpp/rclcpp.hpp>
+#define LOGD(...) RCLCPP_DEBUG(rclcpp::get_logger("motor"), __VA_ARGS__)
+#define LOGI(...) RCLCPP_INFO(rclcpp::get_logger("motor"), __VA_ARGS__)
+#define LOGW(...) RCLCPP_WARN(rclcpp::get_logger("motor"), __VA_ARGS__)
+#define LOGE(...) RCLCPP_ERROR(rclcpp::get_logger("motor"), __VA_ARGS__)
 #else
 #define LOGD(...)                                                              \
   printf(__VA_ARGS__);                                                         \
