@@ -7,10 +7,10 @@ sudo ip link set can0 txqueuelen 100
 sudo ip link set can1 txqueuelen 100
 sudo ip link set can2 txqueuelen 100
 sudo ip link set can3 txqueuelen 100
-sudo ip link set can0 type can bitrate 1000000 
-sudo ip link set can1 type can bitrate 1000000 
-sudo ip link set can2 type can bitrate 1000000 
-sudo ip link set can3 type can bitrate 1000000 
+sudo ip link set can0 type can bitrate 1000000 sample-point 0.8 restart-ms 100
+sudo ip link set can1 type can bitrate 1000000 sample-point 0.8 restart-ms 100
+sudo ip link set can2 type can bitrate 1000000 sample-point 0.8 restart-ms 100
+sudo ip link set can3 type can bitrate 1000000 sample-point 0.8 restart-ms 100
 sudo ip link set up can0
 sudo ip link set up can1
 sudo ip link set up can2
