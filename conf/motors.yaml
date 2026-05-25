@@ -92,8 +92,8 @@ legs:
   FL:  # Front Left
     name: "Front Left"
     can_port: "can0"
-    num_motors: 4
     motors: [FL_M0, FL_M1, FL_M2, FL_M3]
+    #                       速度反
     directions: [-1, -1, 1, -1]
     zero_position_indices: 2  # Index of motors that use ZERO_POS as initial position
     zero_position_offset: 1    # Offset sign for ZERO_POS (subtract for FL/BL)
@@ -101,8 +101,8 @@ legs:
   FR:  # Front Right
     name: "Front Right"
     can_port: "can1"
-    num_motors: 4
     motors: [FR_M0, FR_M1, FR_M2, FR_M3]
+    #               
     directions: [-1, 1, -1, 1]
     zero_position_indices: 2
     zero_position_offset: -1     # Add ZERO_POS for FR/BR
@@ -110,7 +110,6 @@ legs:
   BL:  # Back Left
     name: "Back Left"
     can_port: "can2"
-    num_motors: 4
     motors: [BL_M0, BL_M1, BL_M2, BL_M3]
     directions: [1, -1, 1, -1]
     zero_position_indices: 2
@@ -119,8 +118,8 @@ legs:
   BR:  # Back Right
     name: "Back Right"
     can_port: "can3"
-    num_motors: 4
     motors: [BR_M0, BR_M1, BR_M2, BR_M3]
-    directions: [-1, 1, -1, 1]
+    directions: [1, 1, -1, 1]
     zero_position_indices: 2
     zero_position_offset: -1
+
