@@ -256,7 +256,7 @@ void Motor_Control::update_motor() {
       std::copy(frame.data, frame.data + 8, can_frame.data);
       auto msg = sockcanpp::CanMessage(can_frame);
       hscant_handler->sendMessage(msg);
-      std::this_thread::sleep_for(500us);
+      std::this_thread::sleep_for(800us);
     }
   }
 }
