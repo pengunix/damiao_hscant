@@ -83,9 +83,9 @@ void Motor_Control::enable() {
   for (auto &it : motors) {
     for (int i = 0; i < 5; i++) {
       control_cmd(it.second->GetSlaveId(), 0xFC);
-      usleep(200);
+      std::this_thread::sleep_for(500us);
     }
-    usleep(200);
+    std::this_thread::sleep_for(500us);
   }
 }
 
@@ -122,7 +122,7 @@ void Motor_Control::disable() {
   for (auto &it : motors) {
     for (int i = 0; i < 10; i++) {
       control_cmd(it.second->GetSlaveId(), 0xFD);
-      usleep(150);
+      std::this_thread::sleep_for(500us);
     }
   }
 }
@@ -256,6 +256,7 @@ void Motor_Control::update_motor() {
       std::copy(frame.data, frame.data + 8, can_frame.data);
       auto msg = sockcanpp::CanMessage(can_frame);
       hscant_handler->sendMessage(msg);
+      std::this_thread::sleep_for(800us);
     }
   }
 }
